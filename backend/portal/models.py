@@ -219,7 +219,7 @@ class PaymentMethodConfig(TimeStampedModel):
         NAGAD = "NAGAD", "Nagad"
         BANK_PAY = "BANK_PAY", "Bank Pay"
 
-    method = models.CharField(max_length=12, choices=Method.choices, unique=True)
+    method = models.CharField(max_length=12, choices=Method.choices, db_index=True)
     display_name = models.CharField(max_length=80)
     account_details = models.TextField()
     account_holder = models.CharField(max_length=160, blank=True)
@@ -235,9 +235,15 @@ class Payment(TimeStampedModel):
 
     student = models.ForeignKey(User, on_delete=models.CASCADE, related_name="payments", limit_choices_to={"role": User.Role.STUDENT})
     course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="payments")
+    payment_method = models.ForeignKey(PaymentMethodConfig, on_delete=models.PROTECT, related_name="payments")
     method = models.CharField(max_length=12, choices=PaymentMethodConfig.Method.choices, db_index=True)
+    method_display_name = models.CharField(max_length=80)
+    account_details_snapshot = models.TextField()
+    account_holder_snapshot = models.CharField(max_length=160, blank=True)
     sender_details = models.CharField(max_length=220)
     transaction_id = models.CharField(max_length=120)
+    transaction_id_normalized = models.CharField(max_length=120, editable=False)
+    course_price_snapshot = models.DecimalField(max_digits=10, decimal_places=2)
     amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     currency = models.CharField(max_length=3, default="BDT", editable=False)
     payment_date = models.DateField()
@@ -250,12 +256,13 @@ class Payment(TimeStampedModel):
     class Meta:
         ordering = ["-created_at"]
         constraints = [
-            models.UniqueConstraint(fields=["method", "transaction_id"], name="unique_payment_reference_per_method"),
+            models.UniqueConstraint(fields=["method", "transaction_id_normalized"], name="unique_payment_reference_per_method_ci"),
             models.UniqueConstraint(fields=["student", "course"], condition=models.Q(status="PENDING"), name="one_pending_payment_per_course"),
         ]
 
     def save(self, *args, **kwargs):
         self.transaction_id = self.transaction_id.strip()
+        self.transaction_id_normalized = self.transaction_id.upper()
         super().save(*args, **kwargs)
 
 

@@ -431,19 +431,32 @@ class PaymentMethodConfigSerializer(serializers.ModelSerializer):
 class PaymentSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     course_title = serializers.CharField(source="course.title", read_only=True)
-    proof_url = serializers.SerializerMethodField()
+    payment_method_detail = PaymentMethodConfigSerializer(source="payment_method", read_only=True)
+    reviewer_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
-        fields = ["id", "student", "student_name", "course", "course_title", "method", "sender_details", "transaction_id", "amount", "currency", "payment_date", "proof", "proof_url", "status", "admin_note", "created_at", "reviewed_at"]
-        read_only_fields = ["student", "currency", "status", "admin_note", "created_at", "reviewed_at", "proof_url"]
+        fields = [
+            "id", "student", "student_name", "course", "course_title", "payment_method",
+            "payment_method_detail", "method", "method_display_name", "account_details_snapshot",
+            "account_holder_snapshot", "sender_details", "transaction_id", "course_price_snapshot",
+            "amount", "currency", "payment_date", "proof", "status", "admin_note", "reviewed_by",
+            "reviewer_name", "created_at", "reviewed_at",
+        ]
+        read_only_fields = [
+            "student", "method", "method_display_name", "account_details_snapshot",
+            "account_holder_snapshot", "course_price_snapshot", "currency", "status", "admin_note",
+            "reviewed_by", "reviewer_name", "created_at", "reviewed_at",
+        ]
         extra_kwargs = {"proof": {"write_only": True}}
-
-    def get_proof_url(self, obj):
-        return file_url(obj.proof)
 
     def get_student_name(self, obj):
         return obj.student.get_full_name() or obj.student.email
+
+    def get_reviewer_name(self, obj):
+        if not obj.reviewed_by:
+            return ""
+        return obj.reviewed_by.get_full_name() or obj.reviewed_by.email
 
     def validate_proof(self, value):
         if value.size > settings.PAYMENT_PROOF_MAX_UPLOAD_SIZE:
@@ -452,11 +465,43 @@ class PaymentSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         course = attrs.get("course")
-        if course and course.course_type != Course.CourseType.PAID:
-            raise serializers.ValidationError("Payments are only accepted for paid courses.")
+        payment_method = attrs.get("payment_method")
+        request = self.context.get("request")
+        student = request.user if request and request.user.is_authenticated else None
+        sender_details = str(attrs.get("sender_details", "")).strip()
+        transaction_id = str(attrs.get("transaction_id", "")).strip()
+        if not sender_details:
+            raise serializers.ValidationError({"sender_details": "Sender or account details are required."})
+        if not transaction_id:
+            raise serializers.ValidationError({"transaction_id": "Transaction or reference ID is required."})
+        attrs["sender_details"] = sender_details
+        attrs["transaction_id"] = transaction_id
+        if not payment_method or not payment_method.is_active:
+            raise serializers.ValidationError({"payment_method": "Select an active payment account."})
+        if course and (course.course_type != Course.CourseType.PAID or course.status != Course.Status.PUBLISHED):
+            raise serializers.ValidationError("Payments are only accepted for published paid courses.")
         if course and attrs.get("amount") != course.price:
             raise serializers.ValidationError({"amount": "Payment amount must match the course price."})
+        if student and course and Enrollment.objects.filter(student=student, course=course).exists():
+            raise serializers.ValidationError("You are already enrolled in this course.")
+        if student and course and Payment.objects.filter(student=student, course=course, status=Payment.Status.PENDING).exists():
+            raise serializers.ValidationError("A payment for this course is already pending review.")
+        if Payment.objects.filter(method=payment_method.method, transaction_id_normalized=transaction_id.upper()).exists():
+            raise serializers.ValidationError({"transaction_id": "This transaction reference was already submitted for this payment method."})
         return attrs
+
+    def create(self, validated_data):
+        payment_method = validated_data["payment_method"]
+        course = validated_data["course"]
+        validated_data.update(
+            method=payment_method.method,
+            method_display_name=payment_method.display_name,
+            account_details_snapshot=payment_method.account_details,
+            account_holder_snapshot=payment_method.account_holder,
+            course_price_snapshot=course.price,
+            currency="BDT",
+        )
+        return super().create(validated_data)
 
 
 class CertificateSerializer(serializers.ModelSerializer):

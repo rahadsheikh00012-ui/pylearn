@@ -7,7 +7,7 @@ from django.test import override_settings
 from PIL import Image
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
-from .models import Certificate, Course, CourseCategory, Enrollment, InstructorApplication, LearningMaterial, MaterialProgress, Payment, Quiz, QuizAttempt, User
+from .models import Certificate, Course, CourseCategory, Enrollment, InstructorApplication, LearningMaterial, MaterialProgress, Payment, PaymentMethodConfig, Quiz, QuizAttempt, User
 
 
 def proof_image():
@@ -21,6 +21,7 @@ class PlatformDomainTests(APITestCase):
         self.student = User.objects.create_user(email="student@example.com", password="StudentPass123!", role=User.Role.STUDENT)
         self.instructor = User.objects.create_user(email="teacher@example.com", password="TeacherPass123!", role=User.Role.INSTRUCTOR)
         self.category = CourseCategory.objects.create(name="Security", slug="security")
+        self.bkash = PaymentMethodConfig.objects.create(method="BKASH", display_name="bKash Merchant", account_details="01700000000", account_holder="PyLearn")
 
     def test_admin_approval_creates_instructor_with_forced_password_change(self):
         application = InstructorApplication.objects.create(full_name="New Teacher", email="new@example.com", phone="01700000000", bachelor_degree="BSc", teaching_background="Lecturer")
@@ -36,11 +37,79 @@ class PlatformDomainTests(APITestCase):
         self.client.force_authenticate(self.student)
         blocked = self.client.post("/api/v1/enrollments/", {"course":course.pk}, format="json")
         self.assertEqual(blocked.status_code, 400)
-        payment = Payment.objects.create(student=self.student, course=course, method="BKASH", sender_details="017", transaction_id="TX-1", amount="500.00", payment_date=date.today(), proof=proof_image())
+        payment = Payment.objects.create(
+            student=self.student, course=course, payment_method=self.bkash, method="BKASH",
+            method_display_name=self.bkash.display_name, account_details_snapshot=self.bkash.account_details,
+            account_holder_snapshot=self.bkash.account_holder, sender_details="017", transaction_id="TX-1",
+            course_price_snapshot="500.00", amount="500.00", payment_date=date.today(), proof=proof_image(),
+        )
         self.client.force_authenticate(self.admin)
         approved = self.client.post(f"/api/v1/payments/{payment.pk}/review/", {"decision":"APPROVED"}, format="json")
         self.assertEqual(approved.status_code, 200)
         self.assertTrue(Enrollment.objects.filter(student=self.student, course=course).exists())
+
+    def test_multiple_payment_accounts_and_student_active_filter(self):
+        PaymentMethodConfig.objects.create(method="BKASH", display_name="Second bKash", account_details="01800000000")
+        PaymentMethodConfig.objects.create(method="NAGAD", display_name="Inactive Nagad", account_details="01900000000", is_active=False)
+        self.client.force_authenticate(self.student)
+        response = self.client.get("/api/v1/payment-methods/")
+        rows = response.data.get("results", response.data)
+        self.assertEqual({row["display_name"] for row in rows}, {"bKash Merchant", "Second bKash"})
+
+    def test_payment_submission_captures_snapshots_and_blocks_case_insensitive_reference(self):
+        course = Course.objects.create(title="Paid Python", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED, course_type=Course.CourseType.PAID, price="750.00")
+        self.client.force_authenticate(self.student)
+        payload = {
+            "course": course.pk, "payment_method": self.bkash.pk, "sender_details": "01711111111",
+            "transaction_id": "AbC-123", "amount": "750.00", "payment_date": date.today().isoformat(), "proof": proof_image(),
+        }
+        response = self.client.post("/api/v1/payments/", payload, format="multipart")
+        self.assertEqual(response.status_code, 201, response.data)
+        payment = Payment.objects.get(pk=response.data["id"])
+        self.assertEqual(str(payment.course_price_snapshot), "750.00")
+        self.assertEqual(payment.method_display_name, "bKash Merchant")
+        self.assertEqual(payment.transaction_id_normalized, "ABC-123")
+        course.price = "900.00"; course.save()
+        self.bkash.account_details = "CHANGED"; self.bkash.save()
+        payment.refresh_from_db()
+        self.assertEqual(str(payment.course_price_snapshot), "750.00")
+        self.assertEqual(payment.account_details_snapshot, "01700000000")
+
+        other_course = Course.objects.create(title="Another Paid Course", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED, course_type=Course.CourseType.PAID, price="750.00")
+        payload.update({"course": other_course.pk, "transaction_id": "abc-123", "proof": proof_image()})
+        duplicate = self.client.post("/api/v1/payments/", payload, format="multipart")
+        self.assertEqual(duplicate.status_code, 400)
+
+    def test_inactive_method_enrollment_and_duplicate_pending_are_rejected(self):
+        course = Course.objects.create(title="Protected Paid", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED, course_type=Course.CourseType.PAID, price="500.00")
+        self.bkash.is_active = False; self.bkash.save()
+        self.client.force_authenticate(self.student)
+        payload = {"course":course.pk, "payment_method":self.bkash.pk, "sender_details":"017", "transaction_id":"TX-2", "amount":"500.00", "payment_date":date.today().isoformat(), "proof":proof_image()}
+        self.assertEqual(self.client.post("/api/v1/payments/", payload, format="multipart").status_code, 400)
+        self.bkash.is_active = True; self.bkash.save()
+        payload["proof"] = proof_image()
+        submitted = self.client.post("/api/v1/payments/", payload, format="multipart")
+        self.assertEqual(submitted.status_code, 201, submitted.data)
+        payload.update({"transaction_id":"TX-3", "proof":proof_image()})
+        self.assertEqual(self.client.post("/api/v1/payments/", payload, format="multipart").status_code, 400)
+
+    def test_admin_filter_review_metadata_and_private_proof(self):
+        course = Course.objects.create(title="Review Paid", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED, course_type=Course.CourseType.PAID, price="300.00")
+        payment = Payment.objects.create(student=self.student, course=course, payment_method=self.bkash, method="BKASH", method_display_name=self.bkash.display_name, account_details_snapshot=self.bkash.account_details, account_holder_snapshot="PyLearn", sender_details="017", transaction_id="FILTER-1", course_price_snapshot="300.00", amount="300.00", payment_date=date.today(), proof=proof_image())
+        self.client.force_authenticate(self.instructor)
+        self.assertEqual(self.client.get(f"/api/v1/payments/{payment.pk}/proof/").status_code, 403)
+        instructor_list = self.client.get("/api/v1/payments/")
+        self.assertEqual(instructor_list.data.get("results", instructor_list.data), [])
+        self.client.force_authenticate(self.admin)
+        proof = self.client.get(f"/api/v1/payments/{payment.pk}/proof/")
+        self.assertEqual(proof.status_code, 200)
+        self.assertEqual(proof["Cache-Control"], "private, no-store, max-age=0")
+        approved = self.client.post(f"/api/v1/payments/{payment.pk}/review/", {"decision":"APPROVED"}, format="json")
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.data["reviewer_name"], self.admin.email)
+        filtered = self.client.get("/api/v1/payments/?status=APPROVED")
+        rows = filtered.data.get("results", filtered.data)
+        self.assertEqual([row["id"] for row in rows], [payment.pk])
 
     def test_instructor_course_queryset_is_owner_scoped(self):
         own = Course.objects.create(title="Own", description="Course", category=self.category, instructor=self.instructor)

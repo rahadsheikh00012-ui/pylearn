@@ -2,6 +2,7 @@ from decimal import Decimal
 from io import BytesIO
 import base64
 import json
+import mimetypes
 import uuid
 import firebase_admin
 from firebase_admin import auth as firebase_auth, credentials
@@ -10,7 +11,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Avg, Q
 from django.http import FileResponse
 from django.http import HttpResponse
@@ -441,9 +442,14 @@ class InstructorApplicationViewSet(viewsets.ModelViewSet):
 class PaymentMethodConfigViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentMethodConfigSerializer
     queryset = PaymentMethodConfig.objects.all()
+    http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
-        return self.queryset if is_admin(self.request.user) else self.queryset.filter(is_active=True)
+        if is_admin(self.request.user):
+            return self.queryset.order_by("method", "display_name")
+        if self.request.user.role == User.Role.STUDENT:
+            return self.queryset.filter(is_active=True).order_by("method", "display_name")
+        return self.queryset.none()
 
     def get_permissions(self):
         return [IsAuthenticated()] if self.action in ["list", "retrieve"] else [IsAdminRole()]
@@ -455,19 +461,47 @@ class PaymentViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
-        qs = Payment.objects.select_related("student", "course", "reviewed_by")
-        return qs if is_admin(self.request.user) else qs.filter(student=self.request.user)
+        qs = Payment.objects.select_related("student", "course", "payment_method", "reviewed_by")
+        if is_admin(self.request.user):
+            requested_status = str(self.request.query_params.get("status", "")).upper()
+            if requested_status and requested_status not in Payment.Status.values:
+                raise ValidationError("Status must be PENDING, APPROVED, or REJECTED.")
+            if requested_status in Payment.Status.values:
+                qs = qs.filter(status=requested_status)
+            return qs
+        if self.request.user.role == User.Role.STUDENT:
+            return qs.filter(student=self.request.user)
+        return qs.none()
 
     def perform_create(self, serializer):
         if self.request.user.role != User.Role.STUDENT:
             raise ValidationError("Only students can submit payments.")
         serializer.save(student=self.request.user)
 
+    def create(self, request, *args, **kwargs):
+        try:
+            with transaction.atomic():
+                return super().create(request, *args, **kwargs)
+        except IntegrityError:
+            return Response(
+                {"detail": "This payment duplicates a pending submission or transaction reference."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=["get"], permission_classes=[IsAdminRole])
+    def proof(self, request, pk=None):
+        payment = self.get_object()
+        if not payment.proof:
+            return Response({"detail": "No payment proof is available."}, status=status.HTTP_404_NOT_FOUND)
+        content_type = mimetypes.guess_type(payment.proof.name)[0] or "application/octet-stream"
+        response = FileResponse(payment.proof.open("rb"), content_type=content_type)
+        response["Content-Disposition"] = f'inline; filename="payment-proof-{payment.pk}"'
+        response["Cache-Control"] = "private, no-store, max-age=0"
+        response["Pragma"] = "no-cache"
+        return response
+
     @action(detail=True, methods=["post"], permission_classes=[IsAdminRole])
     def review(self, request, pk=None):
-        payment = self.get_object()
-        if payment.status != Payment.Status.PENDING:
-            return Response({"detail": "This payment was already reviewed."}, status=status.HTTP_400_BAD_REQUEST)
         decision = str(request.data.get("decision", "")).upper()
         if decision not in [Payment.Status.APPROVED, Payment.Status.REJECTED]:
             return Response({"detail": "Decision must be APPROVED or REJECTED."}, status=status.HTTP_400_BAD_REQUEST)
@@ -475,11 +509,17 @@ class PaymentViewSet(viewsets.ModelViewSet):
         if decision == Payment.Status.REJECTED and not note:
             return Response({"detail": "A rejection reason is required."}, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
+            payment = get_object_or_404(
+                Payment.objects.select_for_update().select_related("student", "course", "reviewed_by"),
+                pk=pk,
+            )
+            if payment.status != Payment.Status.PENDING:
+                return Response({"detail": "This payment was already reviewed."}, status=status.HTTP_400_BAD_REQUEST)
             payment.status = decision
             payment.admin_note = note
             payment.reviewed_by = request.user
             payment.reviewed_at = timezone.now()
-            payment.save()
+            payment.save(update_fields=["status", "admin_note", "reviewed_by", "reviewed_at", "updated_at"])
             if decision == Payment.Status.APPROVED:
                 Enrollment.objects.get_or_create(student=payment.student, course=payment.course)
         return Response(self.get_serializer(payment).data)
