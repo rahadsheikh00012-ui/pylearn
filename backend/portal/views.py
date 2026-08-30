@@ -733,7 +733,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_queryset(self):
-        qs = Enrollment.objects.select_related("student", "course", "course__category").prefetch_related("course__materials", "course__enrollments", "material_progress")
+        qs = Enrollment.objects.select_related("student", "course", "course__category").prefetch_related("course__materials", "course__enrollments", "material_progress").order_by("-enrolled_at", "-id")
         if is_admin(self.request.user):
             return qs
         if is_instructor(self.request.user):

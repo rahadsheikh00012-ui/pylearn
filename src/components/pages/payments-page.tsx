@@ -62,8 +62,8 @@ export function PaymentsPage() {
   async function submitPayment(event:FormEvent<HTMLFormElement>){
     event.preventDefault();setMessage("");setFormError("");
     if(!selectedCourse||!selectedMethod){setFormError("Select a paid course and active payment account.");return}
-    const body=new FormData(event.currentTarget);body.set("course",String(selectedCourse.id));body.set("payment_method",String(selectedMethod.id));body.set("amount",selectedCourse.price);setBusyMessage("Submitting payment for review…");
-    try{await api("/payments/",{method:"POST",body});event.currentTarget.reset();setSelectedCourseId("");setSelectedMethodId("");await list.reload();setMessage("Payment submitted. An admin will review it before enrollment.")}
+    const form=event.currentTarget;const body=new FormData(form);body.set("course",String(selectedCourse.id));body.set("payment_method",String(selectedMethod.id));body.set("amount",selectedCourse.price);setBusyMessage("Submitting payment for review…");
+    try{await api("/payments/",{method:"POST",body});form.reset();setSelectedCourseId("");setSelectedMethodId("");await list.reload();setMessage("Payment submitted. An admin will review it before enrollment.")}
     catch(error){setFormError(error instanceof Error?error.message:"Unable to submit payment.")}finally{setBusyMessage("")}
   }
   async function review(id:number,decision:"APPROVED"|"REJECTED"){
