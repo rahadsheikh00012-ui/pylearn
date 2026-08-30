@@ -103,6 +103,7 @@ if not MEDIA_URL.endswith("/"):
 MEDIA_ROOT = BASE_DIR / "media"
 AVATAR_MAX_UPLOAD_SIZE = int(os.getenv("AVATAR_MAX_UPLOAD_SIZE", str(5 * 1024 * 1024)))
 COURSE_THUMBNAIL_MAX_UPLOAD_SIZE = int(os.getenv("COURSE_THUMBNAIL_MAX_UPLOAD_SIZE", str(8 * 1024 * 1024)))
+PAYMENT_PROOF_MAX_UPLOAD_SIZE = int(os.getenv("PAYMENT_PROOF_MAX_UPLOAD_SIZE", str(8 * 1024 * 1024)))
 
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -186,5 +187,7 @@ else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "PyLearn <noreply@pylearn.local>")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
+FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
 AI_CONFIG_ENCRYPTION_KEY = os.getenv("AI_CONFIG_ENCRYPTION_KEY", "")
 MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", str(100 * 1024 * 1024)))

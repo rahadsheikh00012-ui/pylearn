@@ -7,7 +7,7 @@ import { branding } from "@/lib/branding";
 
 export const metadata: Metadata = {
   title: "PyLearn Portal",
-  description: "Learning management and personalized study planning",
+  description: "Learning management and AI-guided learning paths",
   icons: { icon: branding.faviconLight },
 };
 

@@ -7,6 +7,8 @@ import { api, jsonBody } from "@/lib/api";
 import { BrandLogo } from "./brand-logo";
 import { ThemeToggle } from "./theme-toggle";
 import { useAuth } from "./auth-provider";
+import { firebaseGoogleAuth } from "@/lib/firebase";
+import { signInWithPopup } from "firebase/auth";
 
 export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
   const router = useRouter();
@@ -36,6 +38,23 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
       setError(e instanceof Error ? e.message : "Request failed"); 
     } finally { 
       setBusy(false); 
+    }
+  }
+
+  async function signInWithGoogle() {
+    setBusy(true);
+    setError("");
+    try {
+      const { auth, provider } = firebaseGoogleAuth();
+      const result = await signInWithPopup(auth, provider);
+      const idToken = await result.user.getIdToken();
+      await api("/auth/firebase/", { method: "POST", body: jsonBody({ id_token: idToken }) });
+      await refresh();
+      router.push("/dashboard");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Google sign-in failed.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -112,6 +131,12 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
             </Link>
           )}
         </div>
+        {mode === "login" && <div className="grid gap-3 text-sm">
+          <button className="btn btn-secondary" type="button" disabled={busy} onClick={signInWithGoogle}>
+            Continue with Google
+          </button>
+          <div className="flex flex-wrap justify-between gap-2"><Link href="/apply-instructor">Apply as Instructor</Link><Link href="/application-status">Check Application Status</Link></div>
+        </div>}
       </section>
     </main>
   );

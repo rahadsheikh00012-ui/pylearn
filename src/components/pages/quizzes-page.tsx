@@ -48,7 +48,7 @@ export function QuizzesPage() {
   const list = useApiData<Quiz[] | { results: Quiz[] }>("/quizzes/");
   const questionTypes = useApiData<QuestionTypeOption[]> ("/question-types/");
   const courses = useApiData<Course[] | { results: Course[] }>(
-    user?.role === "ADMIN" ? "/courses/" : null
+    user?.role !== "STUDENT" ? "/courses/" : null
   );
   const advisorFields = useApiData<AdvisorField[] | { results: AdvisorField[] }>(user?.role === "ADMIN" ? "/advisor/fields/" : null);
   const questionTypeOptions = questionTypes.data ? unwrap(questionTypes.data) : [];
@@ -212,7 +212,7 @@ export function QuizzesPage() {
         title="Quiz & Assessment" 
         description="Automatic scoring and controlled result publication." 
         action={
-          user?.role === "ADMIN" && (
+          user?.role !== "STUDENT" && (
             <button className="btn btn-primary" onClick={openCreate}>
               {activeTab === "initial" ? "New Initial Assessment" : activeTab === "development" ? "New Skill Development Quiz" : "New Quiz"}
             </button>
@@ -227,13 +227,13 @@ export function QuizzesPage() {
         >
           General Quizzes
         </button>
-        <button
+        {user?.role !== "INSTRUCTOR" && <button
           className={`pb-2 px-1 font-semibold ${activeTab === "initial" ? "border-b-2 border-[var(--primary)] text-[var(--foreground)]" : "text-[var(--muted)]"}`}
           onClick={() => setActiveTab("initial")}
         >
           Initial Assessments
-        </button>
-        <button className={`pb-2 px-1 font-semibold ${activeTab === "development" ? "border-b-2 border-[var(--primary)] text-[var(--foreground)]" : "text-[var(--muted)]"}`} onClick={() => setActiveTab("development")}>Skill Development</button>
+        </button>}
+        {user?.role !== "INSTRUCTOR" && <button className={`pb-2 px-1 font-semibold ${activeTab === "development" ? "border-b-2 border-[var(--primary)] text-[var(--foreground)]" : "text-[var(--muted)]"}`} onClick={() => setActiveTab("development")}>Skill Development</button>}
       </div>
       
       {list.loading ? (
@@ -257,23 +257,23 @@ export function QuizzesPage() {
               
               <div className="mt-auto pt-4 border-t border-[var(--border)] flex flex-wrap gap-2">
                 <Link className="btn btn-primary w-full sm:w-auto" href={`/quizzes/${q.id}`}>
-                  {user?.role === "ADMIN" ? "Review" : "Take quiz"}
+                  {user?.role !== "STUDENT" ? "Review" : "Take quiz"}
                 </Link>
                 
-                {user?.role === "ADMIN" && q.quiz_type === "COURSE" && !q.results_published && (
+                {user?.role !== "STUDENT" && q.quiz_type === "COURSE" && !q.results_published && (
                   <button className="btn btn-secondary w-full sm:w-auto" onClick={() => void publish(q.id)}>
                     Publish results
                   </button>
                 )}
 
-                {user?.role === "ADMIN" && !q.results_published && (
+                {user?.role !== "STUDENT" && !q.results_published && (
                   <button className="btn btn-secondary w-full sm:w-auto" onClick={() => openEdit(q)}>
                     <Pencil size={14} aria-hidden="true" />
                     Edit
                   </button>
                 )}
                 
-                {user?.role === "ADMIN" && (
+                {user?.role !== "STUDENT" && (
                   <button className="btn btn-danger w-full sm:w-auto" onClick={() => void removeQuiz(q.id)}>
                     Delete
                   </button>

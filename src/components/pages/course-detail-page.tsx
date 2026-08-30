@@ -92,7 +92,7 @@ export function CourseDetailPage() {
         title={course.title} 
         description={course.description} 
         action={
-          user?.role === "ADMIN" && (
+          user?.role !== "STUDENT" && (
             <button className="btn btn-primary" onClick={() => setOpen(true)}>
               Add material
             </button>
@@ -147,7 +147,7 @@ export function CourseDetailPage() {
                   </button>
                 )}
                 
-                {user?.role === "ADMIN" && (
+                {user?.role !== "STUDENT" && (
                   <button className="btn btn-danger w-full md:w-auto" onClick={() => void removeMaterial(m.id)}>
                     Delete
                   </button>

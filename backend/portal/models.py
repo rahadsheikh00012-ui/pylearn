@@ -1,7 +1,10 @@
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.core.validators import MinValueValidator
 from django.utils.text import slugify
+from decimal import Decimal
+import uuid
 
 
 class UserManager(BaseUserManager):
@@ -27,10 +30,12 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = "ADMIN", "Admin"
         STUDENT = "STUDENT", "Student"
+        INSTRUCTOR = "INSTRUCTOR", "Instructor"
 
     username = None
     email = models.EmailField(unique=True, db_index=True)
-    role = models.CharField(max_length=10, choices=Role.choices, default=Role.STUDENT, db_index=True)
+    role = models.CharField(max_length=12, choices=Role.choices, default=Role.STUDENT, db_index=True)
+    must_change_password = models.BooleanField(default=False)
     avatar = models.ImageField(upload_to="avatars/%Y/%m/", blank=True)
     bio = models.TextField(blank=True)
     phone = models.CharField(max_length=40, blank=True)
@@ -69,6 +74,10 @@ class Course(TimeStampedModel):
         INTERMEDIATE = "INTERMEDIATE", "Intermediate"
         ADVANCED = "ADVANCED", "Advanced"
 
+    class CourseType(models.TextChoices):
+        FREE = "FREE", "Free"
+        PAID = "PAID", "Paid"
+
     title = models.CharField(max_length=220, db_index=True)
     course_code = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
     description = models.TextField()
@@ -77,11 +86,18 @@ class Course(TimeStampedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True)
     duration_hours = models.PositiveIntegerField(default=0)
     thumbnail = models.ImageField(upload_to="courses/%Y/%m/", blank=True)
+    instructor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="instructor_courses", limit_choices_to={"role": User.Role.INSTRUCTOR})
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_courses")
+    course_type = models.CharField(max_length=8, choices=CourseType.choices, default=CourseType.FREE, db_index=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), validators=[MinValueValidator(Decimal("0.00"))])
+    currency = models.CharField(max_length=3, default="BDT", editable=False)
 
     def __str__(self):
         return self.title
 
     def save(self, *args, **kwargs):
+        if self.course_type == self.CourseType.FREE:
+            self.price = Decimal("0.00")
         if not self.course_code:
             self.course_code = self.generate_course_code()
         else:
@@ -144,6 +160,107 @@ class MaterialProgress(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["enrollment", "material"], name="unique_material_progress")]
+
+
+class InstructorApplication(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    reference = models.CharField(max_length=20, unique=True, editable=False, db_index=True)
+    full_name = models.CharField(max_length=180)
+    email = models.EmailField(db_index=True)
+    phone = models.CharField(max_length=40)
+    bachelor_degree = models.CharField(max_length=220)
+    master_degree = models.CharField(max_length=220, blank=True)
+    years_experience = models.PositiveIntegerField(null=True, blank=True)
+    expertise = models.TextField(blank=True)
+    teaching_background = models.TextField()
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_instructor_applications")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    admin_note = models.TextField(blank=True)
+    instructor_account = models.OneToOneField(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="instructor_application")
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [models.UniqueConstraint(fields=["email"], condition=models.Q(status="PENDING"), name="one_pending_instructor_application_per_email")]
+
+    def save(self, *args, **kwargs):
+        self.email = self.email.strip().lower()
+        if not self.reference:
+            self.reference = f"INS-{uuid.uuid4().hex[:10].upper()}"
+        super().save(*args, **kwargs)
+
+
+class PaymentMethodConfig(TimeStampedModel):
+    class Method(models.TextChoices):
+        BKASH = "BKASH", "bKash"
+        NAGAD = "NAGAD", "Nagad"
+        BANK_PAY = "BANK_PAY", "Bank Pay"
+
+    method = models.CharField(max_length=12, choices=Method.choices, unique=True)
+    display_name = models.CharField(max_length=80)
+    account_details = models.TextField()
+    account_holder = models.CharField(max_length=160, blank=True)
+    instructions = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+
+class Payment(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name="payments", limit_choices_to={"role": User.Role.STUDENT})
+    course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="payments")
+    method = models.CharField(max_length=12, choices=PaymentMethodConfig.Method.choices, db_index=True)
+    sender_details = models.CharField(max_length=220)
+    transaction_id = models.CharField(max_length=120)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    currency = models.CharField(max_length=3, default="BDT", editable=False)
+    payment_date = models.DateField()
+    proof = models.ImageField(upload_to="payment-proofs/%Y/%m/")
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_payments")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    admin_note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["method", "transaction_id"], name="unique_payment_reference_per_method"),
+            models.UniqueConstraint(fields=["student", "course"], condition=models.Q(status="PENDING"), name="one_pending_payment_per_course"),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.transaction_id = self.transaction_id.strip()
+        super().save(*args, **kwargs)
+
+
+class Certificate(TimeStampedModel):
+    student = models.ForeignKey(User, on_delete=models.PROTECT, related_name="certificates")
+    course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="certificates")
+    verification_number = models.CharField(max_length=40, unique=True, editable=False, db_index=True)
+    student_name = models.CharField(max_length=180)
+    course_title = models.CharField(max_length=220)
+    instructor_name = models.CharField(max_length=180, blank=True)
+    eligibility_snapshot = models.JSONField(default=dict)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="revoked_certificates")
+    revocation_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-issued_at"]
+        constraints = [models.UniqueConstraint(fields=["student", "course"], name="one_certificate_per_student_course")]
+
+    def save(self, *args, **kwargs):
+        if not self.verification_number:
+            self.verification_number = f"PYL-{uuid.uuid4().hex[:16].upper()}"
+        super().save(*args, **kwargs)
 
 
 class Quiz(TimeStampedModel):
@@ -229,15 +346,6 @@ class QuizAnswer(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["attempt", "question"], name="unique_attempt_answer")]
-
-
-class StudyPlan(TimeStampedModel):
-    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name="study_plans")
-    provider = models.CharField(max_length=40)
-    summary = models.TextField()
-    weak_topics = models.JSONField(default=list)
-    recommendations = models.JSONField(default=list)
-    schedule = models.JSONField(default=list)
 
 
 class AIProviderConfig(TimeStampedModel):

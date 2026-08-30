@@ -9,4 +9,6 @@ python-dotenv>=1.0,<2.0
 django-storages[s3]>=1.14,<2.0
 vercel-blob>=0.4.2,<0.5.0
 Pillow>=10.0,<13.0
+reportlab>=4.2,<5.0
+firebase-admin>=6.5,<8.0
 whitenoise>=6.8,<7.0

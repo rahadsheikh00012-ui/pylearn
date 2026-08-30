@@ -4,7 +4,8 @@ from django.utils.translation import gettext_lazy as _
 from .models import (
     AIProviderConfig, ActivityLog, Course,
     CourseCategory, EmailNotification, Enrollment, LearningMaterial,
-    MaterialProgress, Question, Quiz, QuizAnswer, QuizAttempt, StudyPlan, User,
+    MaterialProgress, Question, Quiz, QuizAnswer, QuizAttempt, User,
+    InstructorApplication, PaymentMethodConfig, Payment, Certificate,
     AdvisorAnalysis, AdvisorAuditLog, AdvisorRecommendation, AdvisorSkill, CourseSkill, LearningField,
 )
 
@@ -25,7 +26,8 @@ class PortalUserAdmin(UserAdmin):
 
 for model in [CourseCategory, Course, LearningMaterial, Enrollment, MaterialProgress,
               Quiz, Question, QuizAttempt, QuizAnswer,
-              StudyPlan, AIProviderConfig, EmailNotification, ActivityLog,
+              InstructorApplication, PaymentMethodConfig, Payment, Certificate,
+              AIProviderConfig, EmailNotification, ActivityLog,
               LearningField, AdvisorSkill, CourseSkill, AdvisorAnalysis,
               AdvisorRecommendation, AdvisorAuditLog]:
     admin.site.register(model)

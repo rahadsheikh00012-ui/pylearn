@@ -25,7 +25,7 @@ type AdminDashboard = {
   }[];
 };
 
-function AdminDashboardContent({ data }: { data: AdminDashboard }) {
+function ManagementDashboardContent({ data, title }: { data: AdminDashboard; title:string }) {
   return (
     <>
       <div className="grid-cards">
@@ -35,7 +35,7 @@ function AdminDashboardContent({ data }: { data: AdminDashboard }) {
       </div>
 
       <section className="panel p-6">
-        <h2 className="font-bold text-xl mb-4">Recent Activities</h2>
+        <h2 className="font-bold text-xl mb-4">{title}</h2>
         {data.recent_activities.length > 0 ? (
           <div className="flex flex-col">
             {data.recent_activities.map((activity) => (
@@ -242,16 +242,16 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={user?.role === "ADMIN" ? "Dashboard" : `Welcome back, ${user?.first_name || user?.name || "Student"}!`}
+        title={user?.role !== "STUDENT" ? `${user?.role === "ADMIN" ? "Admin" : "Instructor"} Dashboard` : `Welcome back, ${user?.first_name || user?.name || "Student"}!`}
         description={
-          user?.role === "ADMIN"
-            ? `Welcome back, ${user.name}.`
+          user?.role !== "STUDENT"
+            ? `Welcome back, ${user?.name || "PyLearn user"}.`
             : "Keep up the momentum and continue your learning journey."
         }
       />
 
-      {user?.role === "ADMIN" ? (
-        <AdminDashboardContent data={data as AdminDashboard} />
+      {user?.role !== "STUDENT" ? (
+        <ManagementDashboardContent data={data as AdminDashboard} title={user?.role === "ADMIN" ? "Recent Activities" : "Your Recent Course Activity"} />
       ) : (
         <StudentDashboardContent data={data as StudentDashboard} />
       )}

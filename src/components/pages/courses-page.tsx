@@ -140,7 +140,7 @@ export function CoursesPage() {
         title="Course Management"
         description="Browse learning content and course categories."
         action={
-          user?.role === "ADMIN" && (
+          user?.role !== "STUDENT" && (
             <button className="btn btn-primary" onClick={openNewCourseModal}>
               New course
             </button>
@@ -170,7 +170,8 @@ export function CoursesPage() {
                 <div className="flex flex-wrap items-start gap-2">
                   <span className="badge">{c.course_code}</span>
                   <span className="badge">{c.category_detail?.name || 'Uncategorized'}</span>
-                  {user?.role === "ADMIN" && <span className="badge">{c.status}</span>}
+                  <span className="badge">{c.course_type === "FREE" ? "Free" : `${c.currency} ${c.price}`}</span>
+                  {user?.role !== "STUDENT" && <span className="badge">{c.status}</span>}
                 </div>
 
                 <h2 className="text-lg font-bold mt-3">{c.title}</h2>
@@ -190,14 +191,14 @@ export function CoursesPage() {
                       <button
                         className="btn btn-primary"
                         disabled={enrollingCourseId === c.id}
-                        onClick={() => void enroll(c.id)}
+                        onClick={() => c.course_type === "PAID" ? window.location.assign(`/payments?course=${c.id}`) : void enroll(c.id)}
                       >
-                        {enrollingCourseId === c.id ? "Enrolling…" : "Enroll"}
+                        {enrollingCourseId === c.id ? "Enrolling…" : c.course_type === "PAID" ? "Submit payment" : "Enroll"}
                       </button>
                     )
                   )}
 
-                  {user?.role === "ADMIN" && (
+                  {user?.role !== "STUDENT" && (
                     <>
                       <button className="btn btn-secondary" onClick={() => openEditCourseModal(c)}>
                         Edit
@@ -237,14 +238,18 @@ export function CoursesPage() {
               required
               options={categories.data ? unwrap(categories.data).map(c => ({ value: c.id, label: c.name })) : []}
             />
-            <button className="btn btn-secondary" type="button" onClick={() => void createCategory()}>
+            {user?.role === "ADMIN" && <button className="btn btn-secondary" type="button" onClick={() => void createCategory()}>
               Add New
-            </button>
+            </button>}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <ModernSelect className="field" name="level" aria-label="Course level" defaultValue={editingCourse?.level ?? "BEGINNER"} options={levelOptions} />
             <ModernSelect className="field" name="status" aria-label="Course status" defaultValue={editingCourse?.status ?? "PUBLISHED"} options={statusOptions} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <ModernSelect className="field" name="course_type" aria-label="Course type" defaultValue={editingCourse?.course_type ?? "FREE"} options={[{value:"FREE",label:"Free"},{value:"PAID",label:"Paid"}]} />
+            <input className="field" name="price" type="number" min="0" step="0.01" placeholder="Price in BDT" defaultValue={editingCourse?.price ?? "0.00"} />
           </div>
 
           <label className="block space-y-1 mt-2">

@@ -1,4 +1,10 @@
 from decimal import Decimal
+from io import BytesIO
+import base64
+import json
+import uuid
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.password_validation import validate_password
@@ -7,6 +13,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Avg, Q
 from django.http import FileResponse
+from django.http import HttpResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -17,24 +24,26 @@ from rest_framework.decorators import action, api_view, permission_classes, thro
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from .models import (
     AIProviderConfig, ActivityLog, Course,
     CourseCategory, EmailNotification, Enrollment, LearningMaterial, MaterialProgress,
-    Question, Quiz, QuizAnswer, QuizAttempt, StudyPlan, User,
+    Question, Quiz, QuizAnswer, QuizAttempt, User, InstructorApplication,
+    PaymentMethodConfig, Payment, Certificate,
 )
 from .permissions import IsAdminRole
 from .serializers import (
     ActivitySerializer, AdminNotificationSerializer, AdminUserSerializer,
     CategorySerializer, CourseSerializer, EnrollmentSerializer, file_url,
     MaterialSerializer, NotificationSerializer, QuestionAttemptSerializer,
-    QuizAttemptSerializer, QuizReadSerializer, QuizSerializer, RegistrationSerializer, StudyPlanSerializer,
-    UserSerializer,
+    QuizAttemptSerializer, QuizReadSerializer, QuizSerializer, RegistrationSerializer,
+    UserSerializer, InstructorApplicationSerializer, PaymentMethodConfigSerializer,
+    PaymentSerializer, CertificateSerializer,
 )
 from .services import (
-    AIProviderError, encrypt_key, generate_study_plan, log_activity, masked_key, normalize_ai_model, queue_email,
+    AIProviderError, encrypt_key, log_activity, masked_key, normalize_ai_model, queue_email,
     retry_email, generate_assessment_recommendations,
 )
 from .throttles import AuthRateThrottle, PasswordResetRateThrottle
@@ -43,6 +52,34 @@ from .advisor.analysis import analyze_attempt
 
 def is_admin(user):
     return user.is_authenticated and user.role == User.Role.ADMIN
+
+
+def is_instructor(user):
+    return user.is_authenticated and user.role == User.Role.INSTRUCTOR
+
+
+def can_manage_course(user, course):
+    return is_admin(user) or (is_instructor(user) and course.instructor_id == user.pk)
+
+
+def issue_certificate_if_eligible(student, course):
+    enrollment = Enrollment.objects.filter(student=student, course=course).first()
+    if not enrollment:
+        return None
+    material_ids = set(course.materials.values_list("id", flat=True))
+    completed_ids = set(enrollment.material_progress.values_list("material_id", flat=True))
+    quizzes = list(course.quizzes.filter(is_published=True, quiz_type=Quiz.QuizType.COURSE))
+    passed_quiz_ids = set(QuizAttempt.objects.filter(student=student, quiz__in=quizzes, passed=True).values_list("quiz_id", flat=True))
+    if not material_ids or completed_ids != material_ids or not quizzes or any(quiz.pk not in passed_quiz_ids for quiz in quizzes):
+        return None
+    instructor_name = (course.instructor.get_full_name() or course.instructor.email) if course.instructor else "PyLearn Admin"
+    certificate, _ = Certificate.objects.get_or_create(student=student, course=course, defaults={
+        "student_name": student.get_full_name() or student.email,
+        "course_title": course.title,
+        "instructor_name": instructor_name,
+        "eligibility_snapshot": {"materials": len(material_ids), "quizzes": len(quizzes)},
+    })
+    return certificate
 
 
 def initial_assessment_recommendations(request, attempt):
@@ -155,28 +192,6 @@ def question_type_choices(request):
     ])
 
 
-def schedule_item_title(item):
-    return str(item.get("topic") or item.get("title") or item.get("task") or "Study session").strip()
-
-
-def schedule_entries(schedule):
-    for position, item in enumerate(schedule):
-        if not isinstance(item, dict):
-            continue
-        tasks = item.get("tasks")
-        if not isinstance(tasks, list):
-            yield [position], item
-            continue
-        for task_position, task in enumerate(tasks):
-            if not isinstance(task, dict):
-                continue
-            yield [position, task_position], {
-                **task,
-                "day": task.get("day") or item.get("day"),
-                "date": task.get("date") or item.get("date"),
-            }
-
-
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def csrf(request):
@@ -273,11 +288,270 @@ def password_reset_confirm(request):
     return Response({"detail": "Password updated."})
 
 
+@api_view(["POST"])
+def change_password(request):
+    current = str(request.data.get("current_password", ""))
+    new_password = str(request.data.get("new_password", ""))
+    if not request.user.check_password(current):
+        return Response({"detail": "Current password is incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        validate_password(new_password, request.user)
+    except DjangoValidationError as exc:
+        return Response({"detail": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+    request.user.set_password(new_password)
+    request.user.must_change_password = False
+    request.user.save(update_fields=["password", "must_change_password"])
+    login(request, request.user)
+    return Response({"detail": "Password updated."})
+
+
+def firebase_service_account():
+    raw = settings.FIREBASE_SERVICE_ACCOUNT_JSON.strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        try:
+            decoded = base64.b64decode(raw, validate=True).decode("utf-8")
+            return json.loads(decoded)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("FIREBASE_SERVICE_ACCOUNT_JSON must contain JSON or base64-encoded JSON.") from exc
+
+
+def verify_firebase_id_token(raw_token):
+    if not firebase_admin._apps:
+        service_account = firebase_service_account()
+        project_id = settings.FIREBASE_PROJECT_ID or (service_account or {}).get("project_id", "")
+        options = {"projectId": project_id} if project_id else None
+        if service_account:
+            credential = credentials.Certificate(service_account)
+            firebase_admin.initialize_app(credential, options=options)
+        else:
+            firebase_admin.initialize_app(options=options)
+    return firebase_auth.verify_id_token(raw_token, check_revoked=True)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def firebase_login(request):
+    raw_token = str(request.data.get("id_token", "")).strip()
+    if not raw_token:
+        return Response({"detail": "Firebase ID token is required."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        profile = verify_firebase_id_token(raw_token)
+    except (ValueError, firebase_auth.InvalidIdTokenError, firebase_auth.ExpiredIdTokenError,
+            firebase_auth.RevokedIdTokenError, firebase_auth.CertificateFetchError):
+        return Response({"detail": "Google sign-in token is invalid or expired."}, status=status.HTTP_401_UNAUTHORIZED)
+    if not profile.get("email_verified"):
+        return Response({"detail": "Google email must be verified."}, status=status.HTTP_400_BAD_REQUEST)
+    email = str(profile.get("email", "")).strip().lower()
+    if not email:
+        return Response({"detail": "Google account did not provide an email address."}, status=status.HTTP_400_BAD_REQUEST)
+    existing = User.objects.filter(email=email).first()
+    if existing and existing.role != User.Role.STUDENT:
+        return Response({"detail": "Instructor and admin accounts must use email and password."}, status=status.HTTP_403_FORBIDDEN)
+    user, _ = User.objects.get_or_create(
+        email=email,
+        defaults={
+            "role": User.Role.STUDENT,
+            "first_name": str(profile.get("given_name") or str(profile.get("name", "")).split(" ", 1)[0]),
+            "last_name": str(profile.get("family_name") or (str(profile.get("name", "")).split(" ", 1)[1] if " " in str(profile.get("name", "")) else "")),
+        },
+    )
+    user.backend = "django.contrib.auth.backends.ModelBackend"
+    login(request, user)
+    return Response(UserSerializer(user).data)
+
+
+class InstructorApplicationViewSet(viewsets.ModelViewSet):
+    serializer_class = InstructorApplicationSerializer
+    queryset = InstructorApplication.objects.select_related("instructor_account", "reviewed_by")
+    lookup_field = "reference"
+
+    def get_permissions(self):
+        if self.action in ["create", "retrieve"]:
+            return [AllowAny()]
+        return [IsAdminRole()]
+
+    def retrieve(self, request, *args, **kwargs):
+        application = self.get_object()
+        if not is_admin(request.user) and application.email != str(request.query_params.get("email", "")).strip().lower():
+            return Response({"detail": "Application was not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(application).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminRole])
+    def approve(self, request, reference=None):
+        application = self.get_object()
+        if application.status != InstructorApplication.Status.PENDING:
+            return Response({"detail": "Only pending applications can be approved."}, status=status.HTTP_400_BAD_REQUEST)
+        password = str(request.data.get("password", ""))
+        try:
+            validate_password(password)
+        except DjangoValidationError as exc:
+            return Response({"detail": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            names = application.full_name.split(maxsplit=1)
+            account, _ = User.objects.get_or_create(email=application.email, defaults={"first_name": names[0], "last_name": names[1] if len(names) > 1 else ""})
+            if account.role not in [User.Role.STUDENT, User.Role.INSTRUCTOR]:
+                return Response({"detail": "This email belongs to a protected account."}, status=status.HTTP_400_BAD_REQUEST)
+            account.role = User.Role.INSTRUCTOR
+            account.phone = application.phone
+            account.is_active = True
+            account.must_change_password = True
+            account.set_password(password)
+            account.save()
+            application.status = InstructorApplication.Status.APPROVED
+            application.instructor_account = account
+            application.reviewed_by = request.user
+            application.reviewed_at = timezone.now()
+            application.admin_note = str(request.data.get("admin_note", ""))
+            application.save()
+        return Response(self.get_serializer(application).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminRole])
+    def reject(self, request, reference=None):
+        application = self.get_object()
+        if application.status != InstructorApplication.Status.PENDING:
+            return Response({"detail": "Only pending applications can be rejected."}, status=status.HTTP_400_BAD_REQUEST)
+        note = str(request.data.get("admin_note", "")).strip()
+        if not note:
+            return Response({"detail": "A rejection reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+        application.status = InstructorApplication.Status.REJECTED
+        application.admin_note = note
+        application.reviewed_by = request.user
+        application.reviewed_at = timezone.now()
+        application.save()
+        return Response(self.get_serializer(application).data)
+
+
+class PaymentMethodConfigViewSet(viewsets.ModelViewSet):
+    serializer_class = PaymentMethodConfigSerializer
+    queryset = PaymentMethodConfig.objects.all()
+
+    def get_queryset(self):
+        return self.queryset if is_admin(self.request.user) else self.queryset.filter(is_active=True)
+
+    def get_permissions(self):
+        return [IsAuthenticated()] if self.action in ["list", "retrieve"] else [IsAdminRole()]
+
+
+class PaymentViewSet(viewsets.ModelViewSet):
+    serializer_class = PaymentSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        qs = Payment.objects.select_related("student", "course", "reviewed_by")
+        return qs if is_admin(self.request.user) else qs.filter(student=self.request.user)
+
+    def perform_create(self, serializer):
+        if self.request.user.role != User.Role.STUDENT:
+            raise ValidationError("Only students can submit payments.")
+        serializer.save(student=self.request.user)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminRole])
+    def review(self, request, pk=None):
+        payment = self.get_object()
+        if payment.status != Payment.Status.PENDING:
+            return Response({"detail": "This payment was already reviewed."}, status=status.HTTP_400_BAD_REQUEST)
+        decision = str(request.data.get("decision", "")).upper()
+        if decision not in [Payment.Status.APPROVED, Payment.Status.REJECTED]:
+            return Response({"detail": "Decision must be APPROVED or REJECTED."}, status=status.HTTP_400_BAD_REQUEST)
+        note = str(request.data.get("admin_note", "")).strip()
+        if decision == Payment.Status.REJECTED and not note:
+            return Response({"detail": "A rejection reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            payment.status = decision
+            payment.admin_note = note
+            payment.reviewed_by = request.user
+            payment.reviewed_at = timezone.now()
+            payment.save()
+            if decision == Payment.Status.APPROVED:
+                Enrollment.objects.get_or_create(student=payment.student, course=payment.course)
+        return Response(self.get_serializer(payment).data)
+
+
+class CertificateViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = CertificateSerializer
+    lookup_field = "verification_number"
+
+    def get_queryset(self):
+        qs = Certificate.objects.select_related("student", "course")
+        if is_admin(self.request.user):
+            return qs
+        if is_instructor(self.request.user):
+            return qs.filter(course__instructor=self.request.user)
+        return qs.filter(student=self.request.user)
+
+    @action(detail=True, methods=["get"])
+    def download(self, request, verification_number=None):
+        certificate = self.get_object()
+        from reportlab.lib.colors import HexColor
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.pdfgen import canvas
+        buffer = BytesIO()
+        page = landscape(A4)
+        pdf = canvas.Canvas(buffer, pagesize=page)
+        width, height = page
+        pdf.setStrokeColor(HexColor("#2563EB")); pdf.setLineWidth(5); pdf.rect(24, 24, width - 48, height - 48)
+        pdf.setFillColor(HexColor("#0F172A")); pdf.setFont("Helvetica-Bold", 30); pdf.drawCentredString(width / 2, height - 105, "PyLearn Certificate of Completion")
+        pdf.setFont("Helvetica", 15); pdf.drawCentredString(width / 2, height - 155, "This certificate is proudly presented to")
+        pdf.setFillColor(HexColor("#2563EB")); pdf.setFont("Helvetica-Bold", 27); pdf.drawCentredString(width / 2, height - 205, certificate.student_name)
+        pdf.setFillColor(HexColor("#0F172A")); pdf.setFont("Helvetica", 15); pdf.drawCentredString(width / 2, height - 250, "for successfully completing")
+        pdf.setFont("Helvetica-Bold", 22); pdf.drawCentredString(width / 2, height - 292, certificate.course_title)
+        pdf.setFont("Helvetica", 12); pdf.drawString(70, 82, f"Instructor: {certificate.instructor_name}")
+        pdf.drawCentredString(width / 2, 82, f"Issued: {certificate.issued_at.date().isoformat()}")
+        pdf.drawRightString(width - 70, 82, f"Verify: {certificate.verification_number}")
+        if certificate.revoked_at:
+            pdf.setFillColor(HexColor("#B91C1C")); pdf.setFont("Helvetica-Bold", 18); pdf.drawCentredString(width / 2, 45, "REVOKED")
+        pdf.showPage(); pdf.save(); buffer.seek(0)
+        response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="pylearn-{certificate.verification_number}.pdf"'
+        return response
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminRole])
+    def revoke(self, request, verification_number=None):
+        certificate = self.get_object()
+        reason = str(request.data.get("reason", "")).strip()
+        if not reason:
+            return Response({"detail": "A revocation reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+        certificate.revoked_at = timezone.now(); certificate.revoked_by = request.user; certificate.revocation_reason = reason
+        certificate.save(update_fields=["revoked_at", "revoked_by", "revocation_reason", "updated_at"])
+        log_activity(request.user, "REVOKE", "certificate", certificate.pk, reason)
+        return Response(self.get_serializer(certificate).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdminRole])
+    def regenerate(self, request, verification_number=None):
+        certificate = self.get_object()
+        certificate.verification_number = f"PYL-{uuid.uuid4().hex[:16].upper()}"
+        certificate.revoked_at = None; certificate.revoked_by = None; certificate.revocation_reason = ""
+        certificate.save(update_fields=["verification_number", "revoked_at", "revoked_by", "revocation_reason", "updated_at"])
+        log_activity(request.user, "REGENERATE", "certificate", certificate.pk, certificate.verification_number)
+        return Response(self.get_serializer(certificate).data)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def verify_certificate(request, verification_number):
+    certificate = get_object_or_404(Certificate, verification_number=verification_number)
+    return Response(CertificateSerializer(certificate).data)
+
+
 class UserViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAdminRole]
     serializer_class = AdminUserSerializer
     queryset = User.objects.all().order_by("-date_joined")
     http_method_names = ["get", "patch", "delete", "head", "options"]
+
+    def get_permissions(self):
+        return [IsAuthenticated()] if self.action == "list" and is_instructor(self.request.user) else [IsAdminRole()]
+
+    def get_queryset(self):
+        qs = User.objects.all().order_by("-date_joined")
+        if is_instructor(self.request.user):
+            qs = qs.filter(role=User.Role.STUDENT, enrollments__course__instructor=self.request.user).distinct()
+        role = self.request.query_params.get("role")
+        return qs.filter(role=role) if role else qs
 
     def perform_update(self, serializer):
         old_active = serializer.instance.is_active
@@ -306,8 +580,10 @@ class CourseViewSet(viewsets.ModelViewSet):
     serializer_class = CourseSerializer
 
     def get_queryset(self):
-        qs = Course.objects.select_related("category").prefetch_related("materials", "enrollments")
-        if not is_admin(self.request.user):
+        qs = Course.objects.select_related("category", "instructor").prefetch_related("materials", "enrollments")
+        if is_instructor(self.request.user):
+            qs = qs.filter(instructor=self.request.user)
+        elif not is_admin(self.request.user):
             qs = qs.filter(status=Course.Status.PUBLISHED)
         category = self.request.query_params.get("category")
         search = self.request.query_params.get("search")
@@ -318,15 +594,27 @@ class CourseViewSet(viewsets.ModelViewSet):
         return qs.order_by("-created_at")
 
     def get_permissions(self):
-        return [IsAuthenticated()] if self.action in ["list", "retrieve"] else [IsAdminRole()]
+        return [IsAuthenticated()]
 
     def perform_create(self, serializer):
-        course = serializer.save()
+        if is_instructor(self.request.user):
+            course = serializer.save(instructor=self.request.user, created_by=self.request.user)
+        elif is_admin(self.request.user):
+            course = serializer.save(created_by=self.request.user)
+        else:
+            raise ValidationError("Only admins and instructors create courses.")
         log_activity(self.request.user, "CREATE", "course", course.pk, course.title)
 
     def perform_update(self, serializer):
-        course = serializer.save()
+        if not can_manage_course(self.request.user, serializer.instance):
+            raise ValidationError("You cannot manage this course.")
+        course = serializer.save(instructor=self.request.user) if is_instructor(self.request.user) else serializer.save()
         log_activity(self.request.user, "UPDATE", "course", course.pk, course.title)
+
+    def perform_destroy(self, instance):
+        if not can_manage_course(self.request.user, instance):
+            raise PermissionDenied("You cannot delete this course.")
+        instance.delete()
 
 
 class MaterialViewSet(viewsets.ModelViewSet):
@@ -336,13 +624,31 @@ class MaterialViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = LearningMaterial.objects.select_related("course")
-        if not is_admin(self.request.user):
+        if is_instructor(self.request.user):
+            qs = qs.filter(course__instructor=self.request.user)
+        elif not is_admin(self.request.user):
             qs = qs.filter(course__status=Course.Status.PUBLISHED, course__enrollments__student=self.request.user)
         course = self.request.query_params.get("course")
         return qs.filter(course_id=course) if course else qs
 
     def get_permissions(self):
-        return [IsAuthenticated()] if self.action in ["list", "retrieve", "download", "complete"] else [IsAdminRole()]
+        return [IsAuthenticated()]
+
+    def perform_create(self, serializer):
+        if not can_manage_course(self.request.user, serializer.validated_data["course"]):
+            raise ValidationError("You cannot add material to this course.")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        course = serializer.validated_data.get("course", serializer.instance.course)
+        if not can_manage_course(self.request.user, course):
+            raise ValidationError("You cannot edit this material.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not can_manage_course(self.request.user, instance.course):
+            raise ValidationError("You cannot delete this material.")
+        instance.delete()
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
@@ -353,13 +659,15 @@ class MaterialViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
-        if is_admin(request.user):
+        if request.user.role != User.Role.STUDENT:
             return Response({"detail": "Only Students track material completion."}, status=status.HTTP_403_FORBIDDEN)
         material = self.get_object()
         enrollment = get_object_or_404(Enrollment, student=request.user, course=material.course)
         progress, created = MaterialProgress.objects.get_or_create(enrollment=enrollment, material=material)
         if request.data.get("completed") is False:
             progress.delete()
+        else:
+            issue_certificate_if_eligible(request.user, material.course)
         return Response({"completed": created or request.data.get("completed") is not False})
 
 
@@ -369,16 +677,20 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Enrollment.objects.select_related("student", "course", "course__category").prefetch_related("course__materials", "course__enrollments", "material_progress")
-        return qs if is_admin(self.request.user) else qs.filter(student=self.request.user)
+        if is_admin(self.request.user):
+            return qs
+        if is_instructor(self.request.user):
+            return qs.filter(course__instructor=self.request.user)
+        return qs.filter(student=self.request.user)
 
     def perform_create(self, serializer):
-        if is_admin(self.request.user):
-            from rest_framework.exceptions import PermissionDenied
+        if self.request.user.role != User.Role.STUDENT:
             raise PermissionDenied("Only Students enroll themselves.")
         course = serializer.validated_data["course"]
         if course.status != Course.Status.PUBLISHED:
-            from rest_framework.exceptions import ValidationError
             raise ValidationError("Only published courses are available.")
+        if course.course_type == Course.CourseType.PAID:
+            raise ValidationError("Submit payment and wait for admin approval to enroll in this paid course.")
         enrollment = serializer.save(student=self.request.user)
         log_activity(self.request.user, "ENROLL", "course", course.pk, course.title)
         queue_email(self.request.user, "ENROLLMENT", "Course enrollment confirmed", f"You enrolled in {course.title}.")
@@ -392,7 +704,9 @@ class QuizViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Quiz.objects.select_related("course").prefetch_related("questions")
-        if not is_admin(self.request.user):
+        if is_instructor(self.request.user):
+            qs = qs.filter(course__instructor=self.request.user, quiz_type=Quiz.QuizType.COURSE)
+        elif not is_admin(self.request.user):
             qs = qs.filter(
                 Q(is_initial_assessment=True) | Q(quiz_type=Quiz.QuizType.SKILL_DEVELOPMENT) | Q(course__enrollments__student=self.request.user),
                 is_published=True,
@@ -400,23 +714,35 @@ class QuizViewSet(viewsets.ModelViewSet):
         return qs.order_by("-created_at")
 
     def get_permissions(self):
-        return [IsAuthenticated()] if self.action in ["list", "retrieve", "attempt", "results"] else [IsAdminRole()]
+        return [IsAuthenticated()]
 
     def create(self, request, *args, **kwargs):
         serializer = QuizSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        course = serializer.validated_data.get("course")
+        if is_instructor(request.user) and (not course or course.instructor_id != request.user.pk or serializer.validated_data.get("quiz_type") != Quiz.QuizType.COURSE):
+            raise ValidationError("Instructors can create course quizzes only for their own courses.")
+        if not (is_admin(request.user) or is_instructor(request.user)):
+            raise ValidationError("Only admins and instructors create quizzes.")
         quiz = serializer.save()
         return Response(QuizReadSerializer(quiz, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         quiz = self.get_object()
+        if not (is_admin(request.user) or (is_instructor(request.user) and quiz.course and quiz.course.instructor_id == request.user.pk)):
+            raise ValidationError("You cannot edit this quiz.")
         if quiz.results_published:
             raise ValidationError("Published quiz results lock this quiz from editing.")
         serializer = QuizSerializer(quiz, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         quiz = serializer.save()
         return Response(QuizReadSerializer(quiz, context={"request": request}).data)
+
+    def perform_destroy(self, instance):
+        if not (is_admin(self.request.user) or (instance.course and can_manage_course(self.request.user, instance.course))):
+            raise PermissionDenied("You cannot delete this quiz.")
+        instance.delete()
 
     def retrieve(self, request, *args, **kwargs):
         quiz = self.get_object()
@@ -437,7 +763,7 @@ class QuizViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def attempt(self, request, pk=None):
         quiz = self.get_object()
-        if is_admin(request.user):
+        if request.user.role != User.Role.STUDENT:
             return Response({"detail": "Only Students submit quiz attempts."}, status=status.HTTP_403_FORBIDDEN)
         is_advisor = quiz.is_initial_assessment or quiz.quiz_type == Quiz.QuizType.SKILL_DEVELOPMENT
         if not is_advisor:
@@ -473,6 +799,8 @@ class QuizViewSet(viewsets.ModelViewSet):
             attempt.score, attempt.max_score, attempt.percentage = score, maximum, percentage
             attempt.passed = percentage >= quiz.passing_score
             attempt.save(update_fields=["score", "max_score", "percentage", "passed", "updated_at"])
+        if not is_advisor and quiz.course_id:
+            issue_certificate_if_eligible(request.user, quiz.course)
         if is_advisor:
             try:
                 analyze_attempt(attempt.pk, request.user)
@@ -499,8 +827,8 @@ class QuizViewSet(viewsets.ModelViewSet):
         quiz = self.get_object()
         password = request.data.get("password", "")
         user = authenticate(request, username=request.user.email, password=password)
-        if user is None or user.pk != request.user.pk or not is_admin(user):
-            return Response({"detail": "Admin password is required to reveal answers."}, status=status.HTTP_403_FORBIDDEN)
+        if user is None or user.pk != request.user.pk or not (is_admin(user) or (quiz.course and can_manage_course(user, quiz.course))):
+            return Response({"detail": "Course manager password is required to reveal answers."}, status=status.HTTP_403_FORBIDDEN)
         return Response({
             "questions": [
                 {"id": question.pk, "correct_answer": question.correct_answer}
@@ -512,7 +840,7 @@ class QuizViewSet(viewsets.ModelViewSet):
     def results(self, request, pk=None):
         quiz = self.get_object()
         qs = quiz.attempts.select_related("student")
-        if not is_admin(request.user):
+        if not (is_admin(request.user) or (is_instructor(request.user) and quiz.course and quiz.course.instructor_id == request.user.pk)):
             if not quiz.results_published:
                 return Response({"detail": "Results have not been published."}, status=status.HTTP_403_FORBIDDEN)
             qs = qs.filter(student=request.user)
@@ -521,6 +849,8 @@ class QuizViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def publish_results(self, request, pk=None):
         quiz = self.get_object()
+        if not (is_admin(request.user) or (quiz.course and can_manage_course(request.user, quiz.course))):
+            return Response({"detail": "You cannot publish these results."}, status=status.HTTP_403_FORBIDDEN)
         if quiz.is_initial_assessment or quiz.quiz_type != Quiz.QuizType.COURSE:
             return Response({"detail": "Advisor results are reviewed and published per attempt."}, status=status.HTTP_400_BAD_REQUEST)
         quiz.results_published = True
@@ -586,6 +916,10 @@ def progress_payload(student):
     for enrollment in enrollments:
         total = enrollment.course.materials.count()
         completed = enrollment.material_progress.count()
+        required_quizzes = enrollment.course.quizzes.filter(is_published=True, quiz_type=Quiz.QuizType.COURSE)
+        quiz_total = required_quizzes.count()
+        quizzes_passed = required_quizzes.filter(attempts__student=student, attempts__passed=True).distinct().count()
+        certificate = Certificate.objects.filter(student=student, course=enrollment.course).first()
         courses.append({
             "course_id": enrollment.course_id,
             "course_code": enrollment.course.course_code,
@@ -593,6 +927,10 @@ def progress_payload(student):
             "completed_materials": completed,
             "total_materials": total,
             "completion": round(completed / total * 100, 2) if total else 0,
+            "quizzes_passed": quizzes_passed,
+            "quiz_total": quiz_total,
+            "certificate_eligible": bool(total and completed == total and quiz_total and quizzes_passed == quiz_total),
+            "certificate_number": certificate.verification_number if certificate else None,
         })
     weak_topics = []
     for attempt in quiz_attempts.order_by("-completed_at", "-id"):
@@ -678,40 +1016,13 @@ def student_dashboard_payload(request):
         for attempt in published_attempts.select_related("quiz__course").order_by("-completed_at")[:3]
     ]
 
-    latest_plan = StudyPlan.objects.filter(student=request.user).order_by("-created_at").first()
-    today = timezone.localdate()
-    today_labels = {
-        today.isoformat().casefold(),
-        today.strftime("%A").casefold(),
-        today.strftime("%a").casefold(),
-    }
-    today_tasks = []
-    if latest_plan:
-        for path, item in schedule_entries(latest_plan.schedule):
-            task_day = str(item.get("date") or item.get("day") or "").strip().casefold()
-            if task_day not in today_labels:
-                continue
-            today_tasks.append({
-                "id": ".".join(str(value) for value in path),
-                "title": schedule_item_title(item),
-                "minutes": item.get("minutes"),
-                "day": item.get("day") or item.get("date") or today.strftime("%A"),
-                "completed": item.get("completed") is True,
-            })
-
     return {
         "statistics": {
             "enrolled_courses": len(courses),
             "completed_materials": completed_materials,
             "quiz_average": quiz_average,
-            "today_tasks": len(today_tasks),
         },
         "courses": courses,
-        "today_study_plan": {
-            "summary": latest_plan.summary,
-            "tasks": today_tasks,
-            "created_at": latest_plan.created_at,
-        } if latest_plan else None,
         "recent_results": recent_results,
     }
 
@@ -720,6 +1031,10 @@ class ProgressView(APIView):
     def get(self, request):
         if is_admin(request.user) and request.query_params.get("student"):
             student = get_object_or_404(User, pk=request.query_params["student"], role=User.Role.STUDENT)
+        elif is_instructor(request.user) and request.query_params.get("student"):
+            student = get_object_or_404(User, pk=request.query_params["student"], role=User.Role.STUDENT, enrollments__course__instructor=request.user)
+        elif is_instructor(request.user):
+            return Response({"detail": "Select a student enrolled in one of your courses."}, status=status.HTTP_400_BAD_REQUEST)
         else:
             student = request.user
         return Response(progress_payload(student))
@@ -727,13 +1042,28 @@ class ProgressView(APIView):
 
 class DashboardView(APIView):
     def get(self, request):
-        if not is_admin(request.user):
+        if request.user.role == User.Role.STUDENT:
             return Response(student_dashboard_payload(request))
+        if is_instructor(request.user):
+            courses = Course.objects.filter(instructor=request.user)
+            return Response({
+                "statistics": {
+                    "courses": courses.count(),
+                    "published_courses": courses.filter(status=Course.Status.PUBLISHED).count(),
+                    "draft_courses": courses.filter(status=Course.Status.DRAFT).count(),
+                    "quizzes": Quiz.objects.filter(course__instructor=request.user).count(),
+                    "students": User.objects.filter(role=User.Role.STUDENT, enrollments__course__instructor=request.user).distinct().count(),
+                },
+                "recent_activities": ActivitySerializer(ActivityLog.objects.filter(Q(actor=request.user) | Q(entity="course", entity_id__in=courses.values("id"))).select_related("actor")[:20], many=True).data,
+            })
         return Response({
             "statistics": {
                 "users": User.objects.count(), "students": User.objects.filter(role=User.Role.STUDENT).count(),
+                "instructors": User.objects.filter(role=User.Role.INSTRUCTOR).count(),
+                "pending_applications": InstructorApplication.objects.filter(status=InstructorApplication.Status.PENDING).count(),
                 "courses": Course.objects.count(), "enrollments": Enrollment.objects.count(),
-                "quizzes": Quiz.objects.count(),
+                "quizzes": Quiz.objects.count(), "pending_payments": Payment.objects.filter(status=Payment.Status.PENDING).count(),
+                "certificates": Certificate.objects.filter(revoked_at__isnull=True).count(),
             },
             "recent_activities": ActivitySerializer(ActivityLog.objects.select_related("actor")[:20], many=True).data,
         })
@@ -791,91 +1121,6 @@ class AIConfigView(APIView):
             {"id": config.pk, "provider": provider, "model": config.model, "base_url": config.base_url, "api_key": masked_key(config), "is_active": True},
             status=response_status,
         )
-
-
-class StudyPlanView(APIView):
-    throttle_scope = "ai"
-    def get(self, request):
-        return Response(StudyPlanSerializer(StudyPlan.objects.filter(student=request.user).order_by("-created_at")[:10], many=True).data)
-
-    def post(self, request, plan_id=None):
-        if plan_id is not None:
-            return self.complete_schedule_item(request, plan_id)
-        if is_admin(request.user):
-            return Response({"detail": "Only Students generate study plans."}, status=status.HTTP_403_FORBIDDEN)
-        has_enrollment = Enrollment.objects.filter(student=request.user).exists()
-        has_course_quiz_attempt = QuizAttempt.objects.filter(
-            student=request.user,
-            quiz__is_initial_assessment=False,
-        ).exists()
-        missing_requirements = []
-        if not has_enrollment:
-            missing_requirements.append("Enroll in at least one course.")
-        if not has_course_quiz_attempt:
-            missing_requirements.append("Complete at least one course quiz.")
-        if missing_requirements:
-            return Response(
-                {
-                    "detail": "AI study plan needs course activity first: " + " ".join(missing_requirements),
-                    "requirements": missing_requirements,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        performance = progress_payload(request.user)
-        performance["quiz_results"] = list(QuizAttempt.objects.filter(student=request.user, quiz__results_published=True).values("quiz__title", "percentage", "passed"))
-        try:
-            plan = generate_study_plan(request.user, performance)
-        except (AIProviderError, ValueError) as exc:
-            return Response({"detail": f"Study plan is unavailable: {exc}"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        except Exception:
-            return Response({"detail": "Study plan is unavailable: the provider request failed."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        queue_email(request.user, "STUDY_PLAN", "Your PyLearn study plan is ready", plan.summary)
-        return Response(StudyPlanSerializer(plan).data, status=status.HTTP_201_CREATED)
-
-    def delete(self, request, plan_id=None):
-        plans = StudyPlan.objects.filter(student=request.user)
-        if plan_id is not None:
-            plan = get_object_or_404(plans, pk=plan_id)
-            log_activity(request.user, "DELETE", "study_plan", plan.pk, "Deleted study plan")
-            plan.delete()
-        else:
-            count = plans.count()
-            plans.delete()
-            log_activity(request.user, "DELETE", "study_plan", "", f"Cleared {count} study plans")
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    def complete_schedule_item(self, request, plan_id):
-        if is_admin(request.user):
-            return Response({"detail": "Only Students update study-plan progress."}, status=status.HTTP_403_FORBIDDEN)
-        plan = get_object_or_404(StudyPlan.objects.filter(student=request.user), pk=plan_id)
-        item_path = request.data.get("path")
-        if (
-            not isinstance(item_path, list)
-            or len(item_path) not in [1, 2]
-            or not all(isinstance(value, int) for value in item_path)
-        ):
-            return Response({"detail": "A schedule item path is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        schedule = list(plan.schedule)
-        try:
-            if len(item_path) == 1:
-                item = schedule[item_path[0]]
-            else:
-                item = schedule[item_path[0]].get("tasks")[item_path[1]]
-        except (IndexError, TypeError, AttributeError):
-            return Response({"detail": "Schedule item was not found."}, status=status.HTTP_404_NOT_FOUND)
-        if not isinstance(item, dict):
-            return Response({"detail": "Schedule item cannot be completed."}, status=status.HTTP_400_BAD_REQUEST)
-
-        item["completed"] = request.data.get("completed") is not False
-        plan.schedule = schedule
-        plan.save(update_fields=["schedule", "updated_at"])
-        log_activity(request.user, "UPDATE", "study_plan", plan.pk, "Updated study-plan task completion")
-        return Response({
-            "path": item_path,
-            "completed": item["completed"],
-            "schedule": plan.schedule,
-        })
 
 
 class NotificationView(APIView):

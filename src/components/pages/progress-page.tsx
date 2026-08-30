@@ -18,6 +18,10 @@ type Progress = {
     completion: number;
     completed_materials: number;
     total_materials: number;
+    quizzes_passed: number;
+    quiz_total: number;
+    certificate_eligible: boolean;
+    certificate_number?: string | null;
   }[];
   quiz_average: number;
   weak_topics: {
@@ -42,7 +46,7 @@ export function ProgressPage() {
   const [expandedWeakQuiz, setExpandedWeakQuiz] = useState<number | null>(null);
 
   const students = useApiData<User[] | { results: User[] }>(
-    user?.role === "ADMIN" ? "/users/?role=STUDENT" : null
+    user?.role !== "STUDENT" ? "/users/?role=STUDENT" : null
   );
   const studentOptions = useMemo(
     () => unwrap(students.data || [])
@@ -50,14 +54,14 @@ export function ProgressPage() {
       .map(s => ({ value: s.id, label: s.name })),
     [students.data]
   );
-  const reportPath = user?.role === "ADMIN"
+  const reportPath = user?.role !== "STUDENT"
     ? selected ? `/progress/?student=${selected}` : null
     : "/progress/";
   const report = useApiData<Progress>(reportPath);
   const refreshingReport = report.loading && Boolean(report.data);
 
   useEffect(() => {
-    if (user?.role !== "ADMIN" || selected || studentOptions.length === 0) return;
+    if (user?.role === "STUDENT" || selected || studentOptions.length === 0) return;
     setSelected(String(studentOptions[0].value));
   }, [selected, studentOptions, user?.role]);
 
@@ -67,8 +71,8 @@ export function ProgressPage() {
   }
 
   if (students.error) return <ErrorMessage message={students.error} />;
-  if (students.loading || (user?.role === "ADMIN" && !selected) || (report.loading && !report.data)) return <Loading variant="dashboard" />;
-  if (user?.role === "ADMIN" && !students.loading && studentOptions.length === 0) {
+  if (students.loading || (user?.role !== "STUDENT" && !selected) || (report.loading && !report.data)) return <Loading variant="dashboard" />;
+  if (user?.role !== "STUDENT" && !students.loading && studentOptions.length === 0) {
     return <ErrorMessage message="No student reports are available yet." />;
   }
   if (report.error || !report.data) return <ErrorMessage message={report.error || "No report available"} />;
@@ -80,7 +84,7 @@ export function ProgressPage() {
         description="Course completion and assessment performance metrics." 
       />
       
-      {user?.role === "ADMIN" && students.data && (
+      {user?.role !== "STUDENT" && students.data && (
         <div className="panel p-4 flex flex-col gap-3 bg-[var(--background)] sm:flex-row sm:items-center sm:gap-4">
           <label htmlFor="student-select" className="font-semibold text-sm whitespace-nowrap">
             View report for:
@@ -133,6 +137,8 @@ export function ProgressPage() {
                   <div className="muted text-xs mt-1.5 font-medium">
                     {c.completed_materials} of {c.total_materials} materials completed
                   </div>
+                  <div className="muted text-xs mt-1 font-medium">{c.quizzes_passed} of {c.quiz_total} required quizzes passed</div>
+                  <span className="badge mt-2">{c.certificate_number ? "Certificate issued" : c.certificate_eligible ? "Certificate eligible" : "Not yet certificate eligible"}</span>
                 </div>
               ))}
             </div>

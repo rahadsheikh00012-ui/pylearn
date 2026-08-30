@@ -92,7 +92,7 @@ export function QuizDetailPage() {
       <LoadingModal open={revealingAnswers} title="Checking password" message="Unlocking correct answers." />
       <PageHeader title={quiz.title} description={quiz.description} />
 
-      {user?.role === "ADMIN" ? (
+      {user?.role !== "STUDENT" ? (
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-2">

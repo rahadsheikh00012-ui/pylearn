@@ -1,4 +1,5 @@
 from pathlib import Path
+from decimal import Decimal
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ImproperlyConfigured
@@ -9,7 +10,7 @@ from PIL import Image, UnidentifiedImageError
 from .models import (
     ActivityLog, Course, CourseCategory,
     EmailNotification, Enrollment, LearningMaterial, Question, Quiz, QuizAttempt,
-    StudyPlan, User,
+    User, InstructorApplication, PaymentMethodConfig, Payment, Certificate,
 )
 
 
@@ -48,8 +49,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "name", "first_name", "last_name", "role", "is_active", "avatar", "bio", "phone", "student_id", "department", "date_joined"]
-        read_only_fields = ["id", "email", "role", "is_active", "student_id", "date_joined", "name"]
+        fields = ["id", "email", "name", "first_name", "last_name", "role", "is_active", "must_change_password", "avatar", "bio", "phone", "student_id", "department", "date_joined"]
+        read_only_fields = ["id", "email", "role", "is_active", "must_change_password", "student_id", "date_joined", "name"]
 
     def get_name(self, obj):
         return obj.get_full_name() or obj.email
@@ -157,10 +158,11 @@ class CourseSerializer(serializers.ModelSerializer):
     enrollment_count = serializers.IntegerField(source="enrollments.count", read_only=True)
     is_enrolled = serializers.SerializerMethodField()
     thumbnail = SafeImageField(required=False)
+    instructor_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
-        fields = ["id", "course_code", "title", "description", "category", "category_detail", "level", "status", "duration_hours", "thumbnail", "materials", "enrollment_count", "is_enrolled", "created_at", "updated_at"]
+        fields = ["id", "course_code", "title", "description", "category", "category_detail", "level", "status", "duration_hours", "thumbnail", "instructor", "instructor_name", "course_type", "price", "currency", "materials", "enrollment_count", "is_enrolled", "created_at", "updated_at"]
         read_only_fields = ["created_at", "updated_at"]
 
     def validate_course_code(self, value):
@@ -178,6 +180,19 @@ class CourseSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Course image exceeds the configured upload limit.")
         allowed_content_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
         return validate_uploaded_image(value, allowed_content_types, "Course image")
+
+    def get_instructor_name(self, obj):
+        return (obj.instructor.get_full_name() or obj.instructor.email) if obj.instructor else "PyLearn Admin"
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        kind = attrs.get("course_type", getattr(self.instance, "course_type", Course.CourseType.FREE))
+        price = attrs.get("price", getattr(self.instance, "price", Decimal("0.00")))
+        if kind == Course.CourseType.PAID and price <= 0:
+            raise serializers.ValidationError({"price": "Paid courses require a price greater than zero."})
+        if kind == Course.CourseType.FREE:
+            attrs["price"] = Decimal("0.00")
+        return attrs
 
     def create(self, validated_data):
         try:
@@ -199,7 +214,7 @@ class CourseSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return []
-        allowed = request.user.role == User.Role.ADMIN or self.get_is_enrolled(obj)
+        allowed = request.user.role == User.Role.ADMIN or obj.instructor_id == request.user.pk or self.get_is_enrolled(obj)
         return MaterialSerializer(obj.materials.all(), many=True, context=self.context).data if allowed else []
 
     def get_is_enrolled(self, obj):
@@ -394,10 +409,61 @@ class QuizAttemptSerializer(serializers.ModelSerializer):
         fields = ["id", "quiz", "quiz_title", "score", "max_score", "percentage", "passed", "analysis_status", "completed_at"]
 
 
-class StudyPlanSerializer(serializers.ModelSerializer):
+class InstructorApplicationSerializer(serializers.ModelSerializer):
     class Meta:
-        model = StudyPlan
-        fields = ["id", "provider", "summary", "weak_topics", "recommendations", "schedule", "created_at"]
+        model = InstructorApplication
+        fields = ["id", "reference", "full_name", "email", "phone", "bachelor_degree", "master_degree", "years_experience", "expertise", "teaching_background", "status", "admin_note", "created_at", "reviewed_at", "instructor_account"]
+        read_only_fields = ["id", "reference", "status", "admin_note", "created_at", "reviewed_at", "instructor_account"]
+
+    def validate_email(self, value):
+        email = value.strip().lower()
+        if InstructorApplication.objects.filter(email=email, status=InstructorApplication.Status.PENDING).exclude(pk=getattr(self.instance, "pk", None)).exists():
+            raise serializers.ValidationError("A pending application already exists for this email.")
+        return email
+
+
+class PaymentMethodConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PaymentMethodConfig
+        fields = ["id", "method", "display_name", "account_details", "account_holder", "instructions", "is_active"]
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    course_title = serializers.CharField(source="course.title", read_only=True)
+    proof_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Payment
+        fields = ["id", "student", "student_name", "course", "course_title", "method", "sender_details", "transaction_id", "amount", "currency", "payment_date", "proof", "proof_url", "status", "admin_note", "created_at", "reviewed_at"]
+        read_only_fields = ["student", "currency", "status", "admin_note", "created_at", "reviewed_at", "proof_url"]
+        extra_kwargs = {"proof": {"write_only": True}}
+
+    def get_proof_url(self, obj):
+        return file_url(obj.proof)
+
+    def get_student_name(self, obj):
+        return obj.student.get_full_name() or obj.student.email
+
+    def validate_proof(self, value):
+        if value.size > settings.PAYMENT_PROOF_MAX_UPLOAD_SIZE:
+            raise serializers.ValidationError("Payment proof exceeds the configured upload limit.")
+        return validate_uploaded_image(value, {"image/jpeg", "image/png", "image/webp"}, "Payment proof")
+
+    def validate(self, attrs):
+        course = attrs.get("course")
+        if course and course.course_type != Course.CourseType.PAID:
+            raise serializers.ValidationError("Payments are only accepted for paid courses.")
+        if course and attrs.get("amount") != course.price:
+            raise serializers.ValidationError({"amount": "Payment amount must match the course price."})
+        return attrs
+
+
+class CertificateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Certificate
+        fields = ["id", "student", "course", "verification_number", "student_name", "course_title", "instructor_name", "eligibility_snapshot", "issued_at", "revoked_at", "revocation_reason"]
+        read_only_fields = fields
 
 
 class NotificationSerializer(serializers.ModelSerializer):
