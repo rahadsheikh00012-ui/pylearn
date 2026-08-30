@@ -92,6 +92,25 @@ class Course(TimeStampedModel):
     price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"), validators=[MinValueValidator(Decimal("0.00"))])
     currency = models.CharField(max_length=3, default="BDT", editable=False)
 
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(price__gte=Decimal("0.00")),
+                name="course_price_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(course_type="FREE", price=Decimal("0.00"))
+                    | models.Q(course_type="PAID", price__gt=Decimal("0.00"))
+                ),
+                name="course_type_matches_price",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(currency="BDT"),
+                name="course_currency_is_bdt",
+            ),
+        ]
+
     def __str__(self):
         return self.title
 

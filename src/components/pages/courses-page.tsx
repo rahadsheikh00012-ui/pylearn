@@ -22,6 +22,13 @@ const statusOptions = [
   { value: "ARCHIVED", label: "Archived" },
 ];
 
+const bdtFormatter = new Intl.NumberFormat("en-BD", {
+  style: "currency",
+  currency: "BDT",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
+
 export function CoursesPage() {
   const { confirm: confirmDialog, notify, prompt: promptDialog } = useFeedbackDialog();
   const { user } = useAuth();
@@ -33,17 +40,20 @@ export function CoursesPage() {
   const [formError, setFormError] = useState("");
   const [enrollingCourseId, setEnrollingCourseId] = useState<number | null>(null);
   const [busyMessage, setBusyMessage] = useState("");
+  const [courseType, setCourseType] = useState<"FREE" | "PAID">("FREE");
 
   const courses = data ? unwrap(data) : [];
 
   function openNewCourseModal() {
     setEditingCourse(null);
+    setCourseType("FREE");
     setFormError("");
     setOpen(true);
   }
 
   function openEditCourseModal(course: Course) {
     setEditingCourse(course);
+    setCourseType(course.course_type);
     setFormError("");
     setOpen(true);
   }
@@ -170,12 +180,20 @@ export function CoursesPage() {
                 <div className="flex flex-wrap items-start gap-2">
                   <span className="badge">{c.course_code}</span>
                   <span className="badge">{c.category_detail?.name || 'Uncategorized'}</span>
-                  <span className="badge">{c.course_type === "FREE" ? "Free" : `${c.currency} ${c.price}`}</span>
+                  <span className={`badge ${c.course_type === "PAID" ? "text-[var(--primary)]" : "text-[var(--success)]"}`}>
+                    {c.course_type === "FREE" ? "Free" : bdtFormatter.format(Number(c.price))}
+                  </span>
                   {user?.role !== "STUDENT" && <span className="badge">{c.status}</span>}
                 </div>
 
                 <h2 className="text-lg font-bold mt-3">{c.title}</h2>
                 <p className="muted mt-2 line-clamp-3 flex-1">{c.description}</p>
+                <div className="muted mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  <span>{c.instructor_name}</span>
+                  <span>{c.level.charAt(0) + c.level.slice(1).toLowerCase()}</span>
+                  <span>{c.duration_hours} {c.duration_hours === 1 ? "hour" : "hours"}</span>
+                  <span>{c.enrollment_count} enrolled</span>
+                </div>
 
                 <div className="flex flex-wrap items-center gap-2 mt-5">
                   <Link className="btn btn-secondary" href={`/courses/${c.id}`}>
@@ -248,8 +266,21 @@ export function CoursesPage() {
             <ModernSelect className="field" name="status" aria-label="Course status" defaultValue={editingCourse?.status ?? "PUBLISHED"} options={statusOptions} />
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <ModernSelect className="field" name="course_type" aria-label="Course type" defaultValue={editingCourse?.course_type ?? "FREE"} options={[{value:"FREE",label:"Free"},{value:"PAID",label:"Paid"}]} />
-            <input className="field" name="price" type="number" min="0" step="0.01" placeholder="Price in BDT" defaultValue={editingCourse?.price ?? "0.00"} />
+            <ModernSelect className="field" name="course_type" aria-label="Course type" value={courseType} onValueChange={(value) => setCourseType(value as "FREE" | "PAID")} options={[{value:"FREE",label:"Free"},{value:"PAID",label:"Paid"}]} />
+            <label className="block space-y-1">
+              <span className="font-semibold text-sm">Price (BDT)</span>
+              <input
+                className="field"
+                name="price"
+                type="number"
+                min={courseType === "PAID" ? "0.01" : "0"}
+                step="0.01"
+                placeholder={courseType === "PAID" ? "e.g. 1500" : "Free course"}
+                defaultValue={editingCourse?.price ?? "0.00"}
+                disabled={courseType === "FREE"}
+                required={courseType === "PAID"}
+              />
+            </label>
           </div>
 
           <label className="block space-y-1 mt-2">
