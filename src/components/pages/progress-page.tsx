@@ -41,12 +41,12 @@ type Progress = {
 };
 
 export function ProgressPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [selected, setSelected] = useState("");
   const [expandedWeakQuiz, setExpandedWeakQuiz] = useState<number | null>(null);
 
   const students = useApiData<User[] | { results: User[] }>(
-    user?.role !== "STUDENT" ? "/users/?role=STUDENT" : null
+    user && user.role !== "STUDENT" ? "/users/?role=STUDENT" : null
   );
   const studentOptions = useMemo(
     () => unwrap(students.data || [])
@@ -54,7 +54,7 @@ export function ProgressPage() {
       .map(s => ({ value: s.id, label: s.name })),
     [students.data]
   );
-  const reportPath = user?.role !== "STUDENT"
+  const reportPath = !user ? null : user.role !== "STUDENT"
     ? selected ? `/progress/?student=${selected}` : null
     : "/progress/";
   const report = useApiData<Progress>(reportPath);
@@ -70,11 +70,12 @@ export function ProgressPage() {
     setExpandedWeakQuiz(null);
   }
 
+  if (authLoading) return <Loading variant="dashboard" />;
   if (students.error) return <ErrorMessage message={students.error} />;
-  if (students.loading || (user?.role !== "STUDENT" && !selected) || (report.loading && !report.data)) return <Loading variant="dashboard" />;
   if (user?.role !== "STUDENT" && !students.loading && studentOptions.length === 0) {
     return <ErrorMessage message="No student reports are available yet." />;
   }
+  if (students.loading || (user?.role !== "STUDENT" && !selected) || (report.loading && !report.data)) return <Loading variant="dashboard" />;
   if (report.error || !report.data) return <ErrorMessage message={report.error || "No report available"} />;
 
   return (

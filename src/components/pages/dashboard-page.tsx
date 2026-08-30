@@ -233,10 +233,12 @@ function StudentDashboardContent({ data }: { data: StudentDashboard }) {
 }
 
 export function DashboardPage() {
-  const { user } = useAuth();
-  const { data, loading, error } = useApiData<StudentDashboard | AdminDashboard>("/dashboard/");
+  const { user, loading: authLoading } = useAuth();
+  const { data, loading, error } = useApiData<StudentDashboard | AdminDashboard>(
+    user ? "/dashboard/" : null
+  );
 
-  if (loading) return <Loading variant="dashboard" />;
+  if (authLoading || loading) return <Loading variant="dashboard" />;
   if (error || !data) return <ErrorMessage message={error || "Dashboard data is unavailable."} />;
 
   return (
@@ -251,7 +253,7 @@ export function DashboardPage() {
       />
 
       {user?.role !== "STUDENT" ? (
-        <ManagementDashboardContent data={data as AdminDashboard} title={user?.role === "ADMIN" ? "Recent Activities" : "Your Recent Course Activity"} />
+        <ManagementDashboardContent data={data as AdminDashboard} title={user?.role === "ADMIN" ? "Recent Activities" : "Your Recent Activity"} />
       ) : (
         <StudentDashboardContent data={data as StudentDashboard} />
       )}

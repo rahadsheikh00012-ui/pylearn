@@ -345,20 +345,33 @@ def firebase_login(request):
         return Response({"detail": "Google sign-in token is invalid or expired."}, status=status.HTTP_401_UNAUTHORIZED)
     if not profile.get("email_verified"):
         return Response({"detail": "Google email must be verified."}, status=status.HTTP_400_BAD_REQUEST)
+    if (profile.get("firebase") or {}).get("sign_in_provider") != "google.com":
+        return Response({"detail": "This endpoint only accepts Google sign-in."}, status=status.HTTP_400_BAD_REQUEST)
     email = str(profile.get("email", "")).strip().lower()
     if not email:
         return Response({"detail": "Google account did not provide an email address."}, status=status.HTTP_400_BAD_REQUEST)
     existing = User.objects.filter(email=email).first()
     if existing and existing.role != User.Role.STUDENT:
         return Response({"detail": "Instructor and admin accounts must use email and password."}, status=status.HTTP_403_FORBIDDEN)
-    user, _ = User.objects.get_or_create(
-        email=email,
-        defaults={
-            "role": User.Role.STUDENT,
-            "first_name": str(profile.get("given_name") or str(profile.get("name", "")).split(" ", 1)[0]),
-            "last_name": str(profile.get("family_name") or (str(profile.get("name", "")).split(" ", 1)[1] if " " in str(profile.get("name", "")) else "")),
-        },
-    )
+    intent = str(request.data.get("intent", "login")).lower()
+    if not existing and intent != "register":
+        return Response({"detail": "No student account uses this Google email. Create an account first."}, status=status.HTTP_404_NOT_FOUND)
+    department = str(request.data.get("department", "")).strip()
+    if not existing and not department:
+        return Response({"detail": "Department is required to create a student account."}, status=status.HTTP_400_BAD_REQUEST)
+    user = existing
+    if not user:
+        full_name = str(profile.get("name", "")).strip()
+        first_name = str(profile.get("given_name") or full_name.split(" ", 1)[0]).strip()
+        last_name = str(profile.get("family_name") or (full_name.split(" ", 1)[1] if " " in full_name else "")).strip()
+        user = User.objects.create_user(
+            email=email,
+            password=None,
+            role=User.Role.STUDENT,
+            first_name=first_name,
+            last_name=last_name,
+            department=department,
+        )
     user.backend = "django.contrib.auth.backends.ModelBackend"
     login(request, user)
     return Response(UserSerializer(user).data)
@@ -1046,6 +1059,7 @@ class DashboardView(APIView):
             return Response(student_dashboard_payload(request))
         if is_instructor(request.user):
             courses = Course.objects.filter(instructor=request.user)
+            recent_activities = ActivityLog.objects.filter(actor=request.user).select_related("actor")[:20]
             return Response({
                 "statistics": {
                     "courses": courses.count(),
@@ -1054,7 +1068,7 @@ class DashboardView(APIView):
                     "quizzes": Quiz.objects.filter(course__instructor=request.user).count(),
                     "students": User.objects.filter(role=User.Role.STUDENT, enrollments__course__instructor=request.user).distinct().count(),
                 },
-                "recent_activities": ActivitySerializer(ActivityLog.objects.filter(Q(actor=request.user) | Q(entity="course", entity_id__in=courses.values("id"))).select_related("actor")[:20], many=True).data,
+                "recent_activities": ActivitySerializer(recent_activities, many=True).data,
             })
         return Response({
             "statistics": {
