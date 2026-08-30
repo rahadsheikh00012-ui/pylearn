@@ -1,0 +1,75 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules/
+.pnp
+.pnp.*
+
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/dist/
+
+
+# Local secrets. Keep documented examples trackable.
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/.env.local
+!.env.example
+!backend/.env.example
+
+# Python / Django
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+backend/media/
+backend/staticfiles/
+*.sqlite3
+*.sqlite3-*
+*.db
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+local-*
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Office temporary files
+~$*
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dev.log
+dev.out.log
+test
+prompt
+
+server.log
+backend/portal/tests.py
