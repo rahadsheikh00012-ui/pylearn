@@ -15,3 +15,11 @@ class IsStudentRole(BasePermission):
 class IsInstructorRole(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user.is_authenticated and request.user.role == User.Role.INSTRUCTOR)
+
+
+class IsAdminOrInstructorRole(BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user.is_authenticated
+            and request.user.role in {User.Role.ADMIN, User.Role.INSTRUCTOR}
+        )

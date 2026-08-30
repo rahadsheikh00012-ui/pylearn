@@ -51,6 +51,24 @@ class PlatformDomainTests(APITestCase):
         rows = response.data.get("results", response.data)
         self.assertEqual([row["id"] for row in rows], [own.pk])
 
+    def test_instructor_can_create_category_and_owned_course(self):
+        self.client.force_authenticate(self.instructor)
+        category_response = self.client.post("/api/v1/categories/", {"name": "Cloud Engineering"}, format="json")
+        self.assertEqual(category_response.status_code, 201)
+        course_response = self.client.post("/api/v1/courses/", {
+            "title": "Cloud Fundamentals",
+            "description": "Learn cloud fundamentals.",
+            "category": category_response.data["id"],
+            "level": Course.Level.BEGINNER,
+            "status": Course.Status.DRAFT,
+            "course_type": Course.CourseType.FREE,
+            "duration_hours": 4,
+        }, format="json")
+        self.assertEqual(course_response.status_code, 201)
+        course = Course.objects.get(pk=course_response.data["id"])
+        self.assertEqual(course.instructor, self.instructor)
+        self.assertEqual(course.created_by, self.instructor)
+
     def test_instructor_dashboard_loads_with_owned_course_activity(self):
         from .models import ActivityLog
 

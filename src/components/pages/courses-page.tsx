@@ -238,7 +238,7 @@ export function CoursesPage() {
               required
               options={categories.data ? unwrap(categories.data).map(c => ({ value: c.id, label: c.name })) : []}
             />
-            {user?.role === "ADMIN" && <button className="btn btn-secondary" type="button" onClick={() => void createCategory()}>
+            {user?.role !== "STUDENT" && <button className="btn btn-secondary" type="button" onClick={() => void createCategory()}>
               Add New
             </button>}
           </div>

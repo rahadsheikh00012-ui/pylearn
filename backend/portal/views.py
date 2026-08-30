@@ -33,7 +33,7 @@ from .models import (
     Question, Quiz, QuizAnswer, QuizAttempt, User, InstructorApplication,
     PaymentMethodConfig, Payment, Certificate,
 )
-from .permissions import IsAdminRole
+from .permissions import IsAdminOrInstructorRole, IsAdminRole
 from .serializers import (
     ActivitySerializer, AdminNotificationSerializer, AdminUserSerializer,
     CategorySerializer, CourseSerializer, EnrollmentSerializer, file_url,
@@ -586,7 +586,11 @@ class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
 
     def get_permissions(self):
-        return [IsAuthenticated()] if self.action in ["list", "retrieve"] else [IsAdminRole()]
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        if self.action == "create":
+            return [IsAdminOrInstructorRole()]
+        return [IsAdminRole()]
 
 
 class CourseViewSet(viewsets.ModelViewSet):
