@@ -7,16 +7,24 @@ import { ErrorMessage, Loading, LoadingModal, PageHeader } from "@/components/ui
 import { ModernSelect } from "@/components/modern-select";
 import { useApiData } from "@/hooks/use-api-data";
 
-type Config = { id: number; provider: string; model: string; base_url: string; api_key: string; is_active: boolean } | null;
+type Config = {
+  id: number;
+  provider: string;
+  model: string;
+  base_url: string;
+  api_key: string;
+  is_active: boolean;
+} | null;
+
 type Provider = "OPENAI" | "GEMINI" | "GENERIC";
 
-const providerOptions = [
+const PROVIDER_OPTIONS = [
   { value: "OPENAI", label: "OpenAI" },
   { value: "GEMINI", label: "Gemini" },
   { value: "GENERIC", label: "OpenAI-compatible" },
 ];
 
-const modelOptions: Record<Exclude<Provider, "GENERIC">, { value: string; label: string }[]> = {
+const MODEL_OPTIONS: Record<Exclude<Provider, "GENERIC">, { value: string; label: string }[]> = {
   OPENAI: [
     { value: "gpt-5-mini", label: "GPT-5 mini" },
     { value: "gpt-5-nano", label: "GPT-5 nano" },
@@ -31,31 +39,50 @@ const modelOptions: Record<Exclude<Provider, "GENERIC">, { value: string; label:
 };
 
 function normalizeProvider(value: string | null | undefined): Provider {
-  const normalized = String(value || "").trim().toUpperCase().replace(/[-\s]+/g, "_");
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[-\s]+/g, "_");
+
   if (normalized === "OPENAI") return "OPENAI";
   if (normalized === "GEMINI" || normalized === "GOOGLE_GEMINI") return "GEMINI";
-  if (normalized === "GENERIC" || normalized === "OPENAI_COMPATIBLE" || normalized === "OPENAI_COMPAT") return "GENERIC";
+  if (
+    normalized === "GENERIC" ||
+    normalized === "OPENAI_COMPATIBLE" ||
+    normalized === "OPENAI_COMPAT"
+  ) {
+    return "GENERIC";
+  }
+
   return "OPENAI";
 }
 
-function defaultModel(provider: Provider) {
-  return provider === "GENERIC" ? "" : modelOptions[provider][0].value;
+function getDefaultModel(provider: Provider): string {
+  return provider === "GENERIC" ? "" : MODEL_OPTIONS[provider][0].value;
 }
 
-function providerModelOptions(provider: Exclude<Provider, "GENERIC">, model: string) {
-  const options = modelOptions[provider];
-  if (!model || options.some(option => option.value === model)) return options;
-  return [{ value: model, label: `Current: ${model}` }, ...options];
+function getProviderModelOptions(
+  provider: Exclude<Provider, "GENERIC">,
+  currentModel: string
+) {
+  const options = MODEL_OPTIONS[provider];
+  if (!currentModel || options.some((option) => option.value === currentModel)) {
+    return options;
+  }
+
+  return [{ value: currentModel, label: `Current: ${currentModel}` }, ...options];
 }
 
 export function AISettingsPage() {
   const current = useApiData<Config>("/ai/config/");
-  const [editing, setEditing] = useState(false);
+
+  const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState("");
   const [provider, setProvider] = useState<Provider>("OPENAI");
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
   const hasConfig = Boolean(current.data);
 
   useEffect(() => {
@@ -63,64 +90,90 @@ export function AISettingsPage() {
       setProvider("OPENAI");
       setModel("");
       setBaseUrl("");
-      setEditing(true);
+      setIsEditing(true);
       return;
     }
+
     const currentProvider = normalizeProvider(current.data.provider);
     setProvider(currentProvider);
     setModel(current.data.model);
     setBaseUrl(current.data.base_url || "");
-    setEditing(false);
+    setIsEditing(false);
   }, [current.data]);
 
-  function changeProvider(nextProvider: string) {
+  function handleProviderChange(nextProvider: string) {
     const typedProvider = normalizeProvider(nextProvider);
     setProvider(typedProvider);
-    setModel(defaultModel(typedProvider));
-    if (typedProvider !== "GENERIC") setBaseUrl("");
-  }
-
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    const raw = Object.fromEntries(new FormData(event.currentTarget));
-    try {
-      setSaving(true);
-      await api("/ai/config/", { method: "POST", body: jsonBody(raw) });
-      await current.reload();
-      setEditing(false);
-    } catch (x) {
-      setError(x instanceof Error ? x.message : "Unable to save");
-    } finally {
-      setSaving(false);
+    setModel(getDefaultModel(typedProvider));
+    if (typedProvider !== "GENERIC") {
+      setBaseUrl("");
     }
   }
 
-  function cancelEdit() {
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+
+    const formData = Object.fromEntries(new FormData(event.currentTarget));
+
+    try {
+      setIsSaving(true);
+      await api("/ai/config/", {
+        method: "POST",
+        body: jsonBody(formData),
+      });
+      await current.reload();
+      setIsEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save configuration");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleCancel() {
     if (!current.data) return;
+
     setProvider(normalizeProvider(current.data.provider));
     setModel(current.data.model);
     setBaseUrl(current.data.base_url || "");
     setError("");
-    setEditing(false);
+    setIsEditing(false);
   }
 
-  if (current.loading) return <Loading variant="form" />;
+  if (current.loading) {
+    return <Loading variant="form" />;
+  }
 
   return (
     <>
-      <LoadingModal open={saving} title="Saving provider" message="Updating the active AI configuration." />
-      <PageHeader title="AI Provider Settings" description="Configure one active encrypted provider credential." />
-      <div className="grid md:grid-cols-2 gap-5">
+      <LoadingModal
+        open={isSaving}
+        title="Saving provider"
+        message="Updating the active AI configuration."
+      />
+
+      <PageHeader
+        title="AI Provider Settings"
+        description="Configure one active encrypted provider credential."
+      />
+
+      <div className="grid gap-5 md:grid-cols-2">
+        {/* Current Configuration Overview */}
         <section className="panel p-5">
           <div className="flex items-start justify-between gap-4">
-            <h2 className="font-bold text-lg">Current configuration</h2>
-            {hasConfig && !editing ? (
-              <button className="btn btn-secondary" type="button" onClick={() => setEditing(true)}>
+            <h2 className="text-lg font-bold">Current configuration</h2>
+            {hasConfig && !isEditing && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsEditing(true)}
+              >
                 <Pencil size={16} /> Edit
               </button>
-            ) : null}
+            )}
           </div>
+
           {current.error ? (
             <ErrorMessage message={current.error} />
           ) : current.data ? (
@@ -147,24 +200,29 @@ export function AISettingsPage() {
           )}
         </section>
 
-        {editing ? (
-          <form className="panel p-5 space-y-3" onSubmit={save}>
-            <h2 className="font-bold text-lg">{hasConfig ? "Edit provider" : "Add provider"}</h2>
+        {/* Configuration Edit/Add Form */}
+        {isEditing && (
+          <form className="panel space-y-3 p-5" onSubmit={handleSave}>
+            <h2 className="text-lg font-bold">
+              {hasConfig ? "Edit provider" : "Add provider"}
+            </h2>
+
             <ModernSelect
               className="field"
               name="provider"
               aria-label="AI provider"
-              options={providerOptions}
+              options={PROVIDER_OPTIONS}
               value={provider}
-              onValueChange={changeProvider}
+              onValueChange={handleProviderChange}
             />
+
             {provider === "GENERIC" ? (
               <input
                 className="field"
                 name="model"
                 placeholder="Model name"
                 value={model}
-                onChange={event => setModel(event.target.value)}
+                onChange={(event) => setModel(event.target.value)}
                 required
               />
             ) : (
@@ -172,21 +230,23 @@ export function AISettingsPage() {
                 className="field"
                 name="model"
                 aria-label="Model"
-                options={providerModelOptions(provider, model)}
-                value={model || defaultModel(provider)}
+                options={getProviderModelOptions(provider, model)}
+                value={model || getDefaultModel(provider)}
                 onValueChange={setModel}
               />
             )}
+
             <input
               className="field"
               name="base_url"
               type="url"
               placeholder="Optional custom base URL"
               value={baseUrl}
-              onChange={event => setBaseUrl(event.target.value)}
+              onChange={(event) => setBaseUrl(event.target.value)}
               disabled={provider !== "GENERIC"}
               required={provider === "GENERIC"}
             />
+
             <input
               className="field"
               name="api_key"
@@ -194,19 +254,30 @@ export function AISettingsPage() {
               placeholder={hasConfig ? "New API key" : "API key"}
               required={!hasConfig}
             />
+
             {error && <ErrorMessage message={error} />}
-            <div className="flex flex-wrap gap-2">
-              <button className="btn btn-primary" type="submit" disabled={saving}>
-                <Save size={16} /> {saving ? "Saving..." : "Save"}
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isSaving}
+              >
+                <Save size={16} /> {isSaving ? "Saving..." : "Save"}
               </button>
-              {hasConfig ? (
-                <button className="btn btn-secondary" type="button" onClick={cancelEdit}>
+
+              {hasConfig && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleCancel}
+                >
                   <X size={16} /> Cancel
                 </button>
-              ) : null}
+              )}
             </div>
           </form>
-        ) : null}
+        )}
       </div>
     </>
   );

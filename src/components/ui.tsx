@@ -3,7 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
-export function PageHeader({ title, description, action }: { title: string; description?: string; action?: React.ReactNode }) {
+export function PageHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
@@ -15,7 +23,13 @@ export function PageHeader({ title, description, action }: { title: string; desc
   );
 }
 
-type LoadingVariant = "page" | "table" | "list" | "detail" | "dashboard" | "form";
+type LoadingVariant =
+  | "page"
+  | "table"
+  | "list"
+  | "detail"
+  | "dashboard"
+  | "form";
 
 function SkeletonBlock({ className }: { className: string }) {
   return <div className={`skeleton ${className}`} />;
@@ -37,6 +51,7 @@ export function Loading({ variant = "page" }: { variant?: LoadingVariant }) {
             </article>
           ))}
         </div>
+
         <div className="dashboard-layout">
           <section className="panel dashboard-section">
             <div className="flex items-start justify-between gap-4 mb-5">
@@ -47,9 +62,12 @@ export function Loading({ variant = "page" }: { variant?: LoadingVariant }) {
               <SkeletonBlock className="h-10 w-32" />
             </div>
             <div className="space-y-3">
-              {[0, 1, 2].map((item) => <SkeletonBlock className="h-32 w-full" key={item} />)}
+              {[0, 1, 2].map((item) => (
+                <SkeletonBlock className="h-32 w-full" key={item} />
+              ))}
             </div>
           </section>
+
           <aside className="dashboard-side-column">
             {[0, 1].map((section) => (
               <section className="panel dashboard-section" key={section}>
@@ -71,11 +89,18 @@ export function Loading({ variant = "page" }: { variant?: LoadingVariant }) {
       <div className="panel table-wrap" aria-label="Loading table">
         <div className="p-5 space-y-4">
           <div className="grid grid-cols-5 gap-4">
-            {[0, 1, 2, 3, 4].map((item) => <SkeletonBlock className="h-4 w-full" key={item} />)}
+            {[0, 1, 2, 3, 4].map((item) => (
+              <SkeletonBlock className="h-4 w-full" key={item} />
+            ))}
           </div>
           {[0, 1, 2, 3, 4].map((row) => (
-            <div className="grid grid-cols-5 gap-4 border-t border-[var(--border)] pt-4" key={row}>
-              {[0, 1, 2, 3, 4].map((cell) => <SkeletonBlock className="h-5 w-full" key={cell} />)}
+            <div
+              className="grid grid-cols-5 gap-4 border-t border-[var(--border)] pt-4"
+              key={row}
+            >
+              {[0, 1, 2, 3, 4].map((cell) => (
+                <SkeletonBlock className="h-5 w-full" key={cell} />
+              ))}
             </div>
           ))}
         </div>
@@ -125,7 +150,9 @@ export function Loading({ variant = "page" }: { variant?: LoadingVariant }) {
       <div className="panel p-6 space-y-5" aria-label="Loading form">
         <SkeletonBlock className="h-6 w-44" />
         <div className="grid gap-4 md:grid-cols-2">
-          {[0, 1, 2, 3].map((item) => <SkeletonBlock className="h-11 w-full" key={item} />)}
+          {[0, 1, 2, 3].map((item) => (
+            <SkeletonBlock className="h-11 w-full" key={item} />
+          ))}
         </div>
         <SkeletonBlock className="h-10 w-36" />
       </div>
@@ -146,13 +173,30 @@ export function Loading({ variant = "page" }: { variant?: LoadingVariant }) {
   );
 }
 
-export function LoadingModal({ open, title = "Working", message = "Please wait while we finish this." }: { open: boolean; title?: string; message?: string }) {
+export function LoadingModal({
+  open,
+  title = "Working",
+  message = "Please wait while we finish this.",
+}: {
+  open: boolean;
+  title?: string;
+  message?: string;
+}) {
   if (!open) return null;
+
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/45 px-4 backdrop-blur-sm" role="status" aria-live="polite">
+    <div
+      className="fixed inset-0 z-[80] grid place-items-center bg-black/45 px-4 backdrop-blur-sm"
+      role="status"
+      aria-live="polite"
+    >
       <div className="panel w-full max-w-sm p-6 text-center shadow-2xl">
         <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-[color-mix(in_srgb,var(--primary)_14%,transparent)] text-[var(--primary)]">
-          <LoaderCircle className="animate-spin" size={28} aria-hidden="true" />
+          <LoaderCircle
+            className="animate-spin"
+            size={28}
+            aria-hidden="true"
+          />
         </div>
         <h2 className="mt-4 text-lg font-bold">{title}</h2>
         <p className="muted mt-2 text-sm">{message}</p>
@@ -161,76 +205,88 @@ export function LoadingModal({ open, title = "Working", message = "Please wait w
   );
 }
 
-export function ErrorMessage({ message }: { message: string }) { 
-  return <div className="error">{message}</div>; 
+export function ErrorMessage({ message }: { message: string }) {
+  return <div className="error">{message}</div>;
 }
 
-export function Empty({ message }: { message: string }) { 
-  return <div className="panel p-8 text-center muted">{message}</div>; 
+export function Empty({ message }: { message: string }) {
+  return <div className="panel p-8 text-center muted">{message}</div>;
 }
 
-export function Modal({ open, title, children, onCloseAction, size = "default" }: { open: boolean; title: string; children: React.ReactNode; onCloseAction: () => void; size?: "default" | "wide" }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const confirmRef = useRef<HTMLDialogElement>(null);
+export function Modal({
+  open,
+  title,
+  children,
+  onCloseAction,
+  size = "default",
+}: {
+  open: boolean;
+  title: string;
+  children: React.ReactNode;
+  onCloseAction: () => void;
+  size?: "default" | "wide";
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const confirmDialogRef = useRef<HTMLDialogElement>(null);
   const [showConfirm, setShowConfirm] = useState(false);
-  
-  // Handle Main Dialog Open/Close state
+
+  // Sync main dialog open/close state
   useEffect(() => {
-    const dialog = ref.current;
+    const dialog = dialogRef.current;
     if (!dialog) return;
-    
+
     if (open && !dialog.open) {
       dialog.showModal();
-    }
-    
-    if (!open && dialog.open) {
+    } else if (!open && dialog.open) {
       dialog.close();
-      setShowConfirm(false); // Reset confirm state if closed externally
+      setShowConfirm(false);
     }
   }, [open]);
 
-  // Handle Confirmation Dialog Open/Close state
+  // Sync confirm dialog open/close state
   useEffect(() => {
-    const confirmDialog = confirmRef.current;
+    const confirmDialog = confirmDialogRef.current;
     if (!confirmDialog) return;
-    
+
     if (showConfirm && !confirmDialog.open) {
       confirmDialog.showModal();
-    }
-    if (!showConfirm && confirmDialog.open) {
+    } else if (!showConfirm && confirmDialog.open) {
       confirmDialog.close();
     }
   }, [showConfirm]);
 
-  const checkForUnsavedChanges = () => {
-    const dialog = ref.current;
+  const hasUnsavedChanges = (): boolean => {
+    const dialog = dialogRef.current;
     if (!dialog) return false;
 
-    const formElements = dialog.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
-      'input:not([type="hidden"]), textarea, select'
-    );
-    
-    for (const el of Array.from(formElements)) {
-      if (el instanceof HTMLInputElement) {
-        if (el.type === 'checkbox' || el.type === 'radio') {
-          if (el.checked !== el.defaultChecked) return true;
-        } else if (el.type === 'file') {
-          if (el.files && el.files.length > 0) return true;
-        } else {
-          if (el.value !== el.defaultValue) return true;
+    const formElements = dialog.querySelectorAll<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >('input:not([type="hidden"]), textarea, select');
+
+    for (const element of Array.from(formElements)) {
+      if (element instanceof HTMLInputElement) {
+        if (element.type === "checkbox" || element.type === "radio") {
+          if (element.checked !== element.defaultChecked) return true;
+        } else if (element.type === "file") {
+          if (element.files && element.files.length > 0) return true;
+        } else if (element.value !== element.defaultValue) {
+          return true;
         }
-      } else if (el instanceof HTMLTextAreaElement) {
-        if (el.value !== el.defaultValue) return true;
-      } else if (el instanceof HTMLSelectElement) {
-        const changed = Array.from(el.options).some(opt => opt.selected !== opt.defaultSelected);
-        if (changed) return true;
+      } else if (element instanceof HTMLTextAreaElement) {
+        if (element.value !== element.defaultValue) return true;
+      } else if (element instanceof HTMLSelectElement) {
+        const isModified = Array.from(element.options).some(
+          (opt) => opt.selected !== opt.defaultSelected
+        );
+        if (isModified) return true;
       }
     }
+
     return false;
   };
 
-  const handleAttemptClose = () => {
-    if (checkForUnsavedChanges()) {
+  const handleCloseAttempt = () => {
+    if (hasUnsavedChanges()) {
       setShowConfirm(true);
     } else {
       onCloseAction();
@@ -238,29 +294,29 @@ export function Modal({ open, title, children, onCloseAction, size = "default" }
   };
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDialogElement>) => {
-    if (e.target === ref.current) {
-      handleAttemptClose();
+    if (e.target === dialogRef.current) {
+      handleCloseAttempt();
     }
   };
 
   return (
     <>
-      {/* MAIN MODAL */}
-      <dialog 
-        ref={ref} 
+      {/* Main Dialog */}
+      <dialog
+        ref={dialogRef}
         onClick={handleBackdropClick}
         onCancel={(e) => {
-          // Intercept the "Escape" key closing the dialog natively
           e.preventDefault();
-          handleAttemptClose();
+          handleCloseAttempt();
         }}
-        className={`m-auto bg-[var(--panel)] text-[var(--foreground)] ${size === "wide" ? "dialog-wide" : ""}`}
+        className={`m-auto bg-[var(--panel)] text-[var(--foreground)] ${size === "wide" ? "dialog-wide" : ""
+          }`}
       >
-        <div className="border-b border-[var(--border)] px-5 py-4 flex justify-between items-center">
-          <h2 className="font-bold text-lg">{title}</h2>
-          <button 
-            type="button" 
-            onClick={handleAttemptClose} 
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+          <h2 className="text-lg font-bold">{title}</h2>
+          <button
+            type="button"
+            onClick={handleCloseAttempt}
             className="text-xl leading-none text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
             aria-label="Close"
           >
@@ -270,29 +326,31 @@ export function Modal({ open, title, children, onCloseAction, size = "default" }
         <div className="p-5">{children}</div>
       </dialog>
 
-      {/* CONFIRMATION MODAL */}
-      <dialog 
-        ref={confirmRef}
+      {/* Unsaved Changes Confirmation Dialog */}
+      <dialog
+        ref={confirmDialogRef}
         onClose={() => setShowConfirm(false)}
-        className="m-auto bg-[var(--panel)] text-[var(--foreground)] rounded-xl border border-[var(--border)] p-0 w-[90%] max-w-sm"
+        className="m-auto w-[90%] max-w-sm rounded-xl border border-[var(--border)] bg-[var(--panel)] p-0 text-[var(--foreground)]"
       >
         <div className="p-6">
-          <h3 className="font-bold text-lg mb-2">Unsaved Changes</h3>
-          <p className="muted text-sm mb-6">
+          <h3 className="mb-2 text-lg font-bold">Unsaved Changes</h3>
+          <p className="muted mb-6 text-sm">
             You have unsaved changes. Are you sure you want to close this and discard them?
           </p>
           <div className="flex justify-end gap-3">
-            <button 
+            <button
+              type="button"
               className="btn btn-secondary"
               onClick={() => setShowConfirm(false)}
             >
               Cancel
             </button>
-            <button 
+            <button
+              type="button"
               className="btn btn-danger"
               onClick={() => {
                 setShowConfirm(false);
-                onCloseAction(); // Proceed with closing the main modal
+                onCloseAction();
               }}
             >
               Discard
@@ -304,11 +362,17 @@ export function Modal({ open, title, children, onCloseAction, size = "default" }
   );
 }
 
-export function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+export function Stat({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
     <div className="panel p-5">
       <div className="muted text-sm">{label}</div>
-      <div className="text-3xl font-bold mt-2">{value}</div>
+      <div className="mt-2 text-3xl font-bold">{value}</div>
     </div>
   );
 }

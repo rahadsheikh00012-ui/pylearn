@@ -3,22 +3,46 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
+import { signInWithPopup } from "firebase/auth";
 import { api, jsonBody } from "@/lib/api";
+import { firebaseGoogleAuth } from "@/lib/firebase";
 import { BrandLogo } from "./brand-logo";
 import { ThemeToggle } from "./theme-toggle";
 import { useAuth } from "./auth-provider";
-import { firebaseGoogleAuth } from "@/lib/firebase";
-import { signInWithPopup } from "firebase/auth";
 
-export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
+type AuthMode = "login" | "register" | "forgot";
+
+const MODE_CONTENT = {
+  login: {
+    title: "Welcome back",
+    subtitle: "Enter your credentials to access your account",
+    submitText: "Sign in",
+  },
+  register: {
+    title: "Create student account",
+    subtitle: "Fill in your details to get started",
+    submitText: "Register",
+  },
+  forgot: {
+    title: "Reset your password",
+    subtitle: "Enter your email to receive a password reset link",
+    submitText: "Send reset link",
+  },
+} as const;
+
+export function AuthForm({ mode }: { mode: AuthMode }) {
   const router = useRouter();
   const { refresh } = useAuth();
 
+  const [department, setDepartment] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const [department, setDepartment] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+
+  const isLogin = mode === "login";
+  const isRegister = mode === "register";
+  const isForgot = mode === "forgot";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -28,7 +52,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
     const values = Object.fromEntries(new FormData(event.currentTarget));
 
     try {
-      if (mode === "forgot") {
+      if (isForgot) {
         await api("/auth/password-reset/", {
           method: "POST",
           body: jsonBody(values),
@@ -42,24 +66,27 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
         await refresh();
         router.push("/dashboard");
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Request failed");
     } finally {
       setBusy(false);
     }
   }
 
   async function signInWithGoogle() {
-    if (mode === "register" && !department.trim()) {
+    if (isRegister && !department.trim()) {
       setError("Please enter your department before continuing with Google.");
       return;
     }
+
     setBusy(true);
     setError("");
+
     try {
       const { auth, provider } = firebaseGoogleAuth();
       const result = await signInWithPopup(auth, provider);
       const idToken = await result.user.getIdToken();
+
       await api("/auth/firebase/", {
         method: "POST",
         body: jsonBody({
@@ -68,10 +95,11 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
           department: department.trim(),
         }),
       });
+
       await refresh();
       router.push("/dashboard");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Google sign-in failed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed.");
     } finally {
       setBusy(false);
     }
@@ -85,18 +113,10 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
           <div>
             <BrandLogo />
             <h1 className="text-2xl font-bold mt-4 tracking-tight text-[var(--foreground)]">
-              {mode === "login"
-                ? "Welcome back"
-                : mode === "register"
-                ? "Create student account"
-                : "Reset your password"}
+              {MODE_CONTENT[mode].title}
             </h1>
             <p className="text-sm text-[var(--muted)] mt-1">
-              {mode === "login"
-                ? "Enter your credentials to access your account"
-                : mode === "register"
-                ? "Fill in your details to get started"
-                : "Enter your email to receive a password reset link"}
+              {MODE_CONTENT[mode].subtitle}
             </p>
           </div>
           <ThemeToggle />
@@ -125,17 +145,19 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
           </div>
         )}
 
+        {/* Reset Confirmation */}
         {done ? (
           <div className="p-4 bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] border border-[color-mix(in_srgb,var(--primary)_30%,transparent)] rounded-xl text-[var(--primary-dark)] dark:text-[var(--primary)] text-sm space-y-2">
             <p className="font-semibold">Reset email requested</p>
             <p className="text-xs opacity-90 leading-relaxed">
-              If an account with that email exists, reset instructions have been sent. Please check your inbox and spam folder.
+              If an account with that email exists, reset instructions have been
+              sent. Please check your inbox and spam folder.
             </p>
           </div>
         ) : (
           <>
             {/* Google OAuth Action */}
-            {mode !== "forgot" && (
+            {!isForgot && (
               <div className="space-y-5">
                 <button
                   type="button"
@@ -162,13 +184,12 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
                     />
                   </svg>
                   <span>
-                    {mode === "register"
+                    {isRegister
                       ? "Create account with Google"
                       : "Continue with Google"}
                   </span>
                 </button>
 
-                {/* Centered Divider */}
                 <div className="flex items-center gap-3">
                   <div className="flex-1 h-px bg-[var(--border)]" />
                   <span className="text-[11px] font-semibold tracking-wider text-[var(--muted)] uppercase whitespace-nowrap">
@@ -181,10 +202,12 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
 
             {/* Credential Form */}
             <form className="space-y-4" onSubmit={submit}>
-              {mode === "register" && (
+              {isRegister && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-[var(--foreground)]">First name</label>
+                    <label className="text-xs font-semibold text-[var(--foreground)]">
+                      First name
+                    </label>
                     <input
                       className="field w-full"
                       name="first_name"
@@ -194,7 +217,9 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-[var(--foreground)]">Last name</label>
+                    <label className="text-xs font-semibold text-[var(--foreground)]">
+                      Last name
+                    </label>
                     <input
                       className="field w-full"
                       name="last_name"
@@ -207,7 +232,9 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
               )}
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[var(--foreground)]">Email address</label>
+                <label className="text-xs font-semibold text-[var(--foreground)]">
+                  Email address
+                </label>
                 <input
                   className="field w-full"
                   name="email"
@@ -218,11 +245,13 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
                 />
               </div>
 
-              {mode !== "forgot" && (
+              {!isForgot && (
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-[var(--foreground)]">Password</label>
-                    {mode === "login" && (
+                    <label className="text-xs font-semibold text-[var(--foreground)]">
+                      Password
+                    </label>
+                    {isLogin && (
                       <Link
                         className="text-xs font-medium text-[var(--muted)] hover:text-[var(--primary)] transition-colors"
                         href="/forgot-password"
@@ -239,23 +268,48 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
                       type={showPassword ? "text" : "password"}
                       placeholder="••••••••••••"
                       minLength={8}
-                      autoComplete={mode === "login" ? "current-password" : "new-password"}
+                      autoComplete={isLogin ? "current-password" : "new-password"}
                       required
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowPassword((prev) => !prev)}
                       aria-label={showPassword ? "Hide password" : "Show password"}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--muted)] hover:text-[var(--foreground)] transition-colors p-1"
                     >
                       {showPassword ? (
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"
+                          />
                         </svg>
                       ) : (
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                          />
                         </svg>
                       )}
                     </button>
@@ -263,15 +317,17 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
                 </div>
               )}
 
-              {mode === "register" && (
+              {isRegister && (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[var(--foreground)]">Department</label>
+                  <label className="text-xs font-semibold text-[var(--foreground)]">
+                    Department
+                  </label>
                   <input
                     className="field w-full"
                     name="department"
                     placeholder="e.g. Computer Science"
                     value={department}
-                    onChange={(event) => setDepartment(event.target.value)}
+                    onChange={(e) => setDepartment(e.target.value)}
                     required
                   />
                 </div>
@@ -279,23 +335,33 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
 
               <div className="pt-2">
                 <button
+                  type="submit"
                   className="btn btn-primary w-full text-base py-2.5 flex items-center justify-center gap-2 font-medium"
                   disabled={busy}
                 >
                   {busy && (
-                    <svg className="w-4 h-4 animate-spin shrink-0" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    <svg
+                      className="w-4 h-4 animate-spin shrink-0"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8v8H4z"
+                      />
                     </svg>
                   )}
                   <span>
-                    {busy
-                      ? "Please wait…"
-                      : mode === "login"
-                      ? "Sign in"
-                      : mode === "register"
-                      ? "Register"
-                      : "Send reset link"}
+                    {busy ? "Please wait…" : MODE_CONTENT[mode].submitText}
                   </span>
                 </button>
               </div>
@@ -306,22 +372,28 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
         {/* Footer Navigation */}
         <div className="pt-4 border-t border-[var(--border)] text-sm text-center space-y-3">
           <p className="text-[var(--muted)]">
-            {mode === "login" ? "Don't have an account?" : "Already have an account?"}{" "}
+            {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
             <Link
               className="font-semibold text-[var(--foreground)] hover:text-[var(--primary)] transition-colors"
-              href={mode === "login" ? "/register" : "/login"}
+              href={isLogin ? "/register" : "/login"}
             >
-              {mode === "login" ? "Create an account" : "Sign in"}
+              {isLogin ? "Create an account" : "Sign in"}
             </Link>
           </p>
 
-          {mode === "login" && (
+          {isLogin && (
             <div className="flex items-center justify-center gap-3 text-xs text-[var(--muted)]">
-              <Link href="/apply-instructor" className="hover:text-[var(--foreground)] transition-colors">
+              <Link
+                href="/apply-instructor"
+                className="hover:text-[var(--foreground)] transition-colors"
+              >
                 Apply as Instructor
               </Link>
               <span className="text-[var(--border)]">•</span>
-              <Link href="/application-status" className="hover:text-[var(--foreground)] transition-colors">
+              <Link
+                href="/application-status"
+                className="hover:text-[var(--foreground)] transition-colors"
+              >
                 Application Status
               </Link>
             </div>

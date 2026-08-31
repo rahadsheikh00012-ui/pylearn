@@ -362,7 +362,7 @@ export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) 
                               setSelectedInstructorId(instructor.id);
                             }}
                           >
-                            View Portfolio <ArrowRight size={13} />
+                            <ArrowRight size={13} /> View Portfolio
                           </button>
                         </td>
                       </tr>
@@ -470,24 +470,22 @@ export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) 
                           </td>
                           <td>
                             <span
-                              className={`badge ${
-                                course.course_type === "FREE"
+                              className={`badge ${course.course_type === "FREE"
                                   ? "bg-[color-mix(in_srgb,var(--success)_15%,transparent)] text-[var(--success)]"
                                   : "bg-[color-mix(in_srgb,var(--primary)_15%,transparent)] text-[var(--primary)]"
-                              }`}
+                                }`}
                             >
                               {course.course_type === "FREE" ? "Free" : bdtFormatter.format(Number(course.price))}
                             </span>
                           </td>
                           <td>
                             <span
-                              className={`badge ${
-                                course.status === "PUBLISHED"
+                              className={`badge ${course.status === "PUBLISHED"
                                   ? "badge-success"
                                   : course.status === "DRAFT"
-                                  ? "badge-warning"
-                                  : ""
-                              }`}
+                                    ? "badge-warning"
+                                    : ""
+                                }`}
                             >
                               {course.status}
                             </span>
@@ -546,9 +544,8 @@ export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) 
             <div className="flex items-center gap-2 border-b border-[var(--border)] pb-2">
               <button
                 type="button"
-                className={`btn text-xs inline-flex items-center gap-2 ${
-                  activeTab === "materials" ? "btn-primary" : "btn-secondary"
-                }`}
+                className={`btn text-xs inline-flex items-center gap-2 ${activeTab === "materials" ? "btn-primary" : "btn-secondary"
+                  }`}
                 onClick={() => setActiveTab("materials")}
               >
                 <FileText size={14} />
@@ -556,9 +553,8 @@ export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) 
               </button>
               <button
                 type="button"
-                className={`btn text-xs inline-flex items-center gap-2 ${
-                  activeTab === "quizzes" ? "btn-primary" : "btn-secondary"
-                }`}
+                className={`btn text-xs inline-flex items-center gap-2 ${activeTab === "quizzes" ? "btn-primary" : "btn-secondary"
+                  }`}
                 onClick={() => setActiveTab("quizzes")}
               >
                 <HelpCircle size={14} />
@@ -634,9 +630,8 @@ export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) 
                         <div className="flex flex-wrap items-center gap-2">
                           <strong className="text-sm font-semibold">{quiz.title}</strong>
                           <span
-                            className={`badge text-[10px] ${
-                              quiz.is_published ? "badge-success" : "badge-warning"
-                            }`}
+                            className={`badge text-[10px] ${quiz.is_published ? "badge-success" : "badge-warning"
+                              }`}
                           >
                             {quiz.is_published ? "Published" : "Draft"}
                           </span>
@@ -717,11 +712,10 @@ export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) 
                         <td className="font-semibold">{attempt.percentage}%</td>
                         <td>
                           <span
-                            className={`badge text-[10px] ${
-                              attempt.passed
+                            className={`badge text-[10px] ${attempt.passed
                                 ? "bg-[color-mix(in_srgb,var(--success)_15%,transparent)] text-[var(--success)]"
                                 : "bg-[color-mix(in_srgb,var(--danger)_15%,transparent)] text-[var(--danger)]"
-                            }`}
+                              }`}
                           >
                             {attempt.passed ? "Passed" : "Failed"}
                           </span>
