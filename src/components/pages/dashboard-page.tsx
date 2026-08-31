@@ -15,10 +15,13 @@ import {
   KeyRound,
   Layers,
   PlusCircle,
+  ShieldAlert,
   Sparkles,
   Trash2,
+  TrendingUp,
   UserCheck,
   UserRound,
+  Users,
 } from "lucide-react";
 import { PageHeader, Loading, ErrorMessage, Stat } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
@@ -35,6 +38,73 @@ type AdminDashboard = {
     created_at: string;
   }[];
 };
+
+function getStatCardMeta(key: string) {
+  const normalizedKey = key.toLowerCase();
+
+  if (normalizedKey.includes("course") || normalizedKey.includes("curriculum")) {
+    return {
+      icon: BookOpen,
+      iconContainer: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+      accentGlow: "from-blue-500/10 to-transparent",
+    };
+  }
+
+  if (
+    normalizedKey.includes("student") ||
+    normalizedKey.includes("enroll") ||
+    normalizedKey.includes("learner")
+  ) {
+    return {
+      icon: GraduationCap,
+      iconContainer: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+      accentGlow: "from-emerald-500/10 to-transparent",
+    };
+  }
+
+  if (
+    normalizedKey.includes("instructor") ||
+    normalizedKey.includes("user") ||
+    normalizedKey.includes("teacher")
+  ) {
+    return {
+      icon: Users,
+      iconContainer: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+      accentGlow: "from-amber-500/10 to-transparent",
+    };
+  }
+
+  if (
+    normalizedKey.includes("quiz") ||
+    normalizedKey.includes("score") ||
+    normalizedKey.includes("assessment")
+  ) {
+    return {
+      icon: CircleCheckBig,
+      iconContainer: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
+      accentGlow: "from-purple-500/10 to-transparent",
+    };
+  }
+
+  if (
+    normalizedKey.includes("revenue") ||
+    normalizedKey.includes("payment") ||
+    normalizedKey.includes("price") ||
+    normalizedKey.includes("earning")
+  ) {
+    return {
+      icon: TrendingUp,
+      iconContainer: "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20",
+      accentGlow: "from-teal-500/10 to-transparent",
+    };
+  }
+
+  return {
+    icon: ChartNoAxesCombined,
+    iconContainer: "bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] text-[var(--primary)] border-[color-mix(in_srgb,var(--primary)_20%,transparent)]",
+    accentGlow: "from-[var(--primary)]/10 to-transparent",
+  };
+}
 
 function getActivityMeta(action: string) {
   const act = action.toLowerCase();
@@ -98,20 +168,52 @@ function ManagementDashboardContent({
 }) {
   return (
     <>
-      <div className="grid-cards">
-        {Object.entries(data.statistics).map(([key, value]) => (
-          <Stat
-            key={key}
-            label={key.replaceAll("_", " ").toUpperCase()}
-            value={value}
-          />
-        ))}
+      {/* Redesigned Statistics Grid Cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Object.entries(data.statistics).map(([key, value]) => {
+          const meta = getStatCardMeta(key);
+          const StatIcon = meta.icon;
+          const formattedLabel = key.replaceAll("_", " ").toUpperCase();
+
+          return (
+            <article
+              key={key}
+              className="panel relative overflow-hidden p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+            >
+              {/* Subtle top-corner gradient glow */}
+              <div
+                className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br ${meta.accentGlow} blur-2xl`}
+                aria-hidden="true"
+              />
+
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold tracking-wider text-[var(--muted)]">
+                  {formattedLabel}
+                </span>
+                <div
+                  className={`grid h-10 w-10 place-items-center rounded-xl border shadow-xs ${meta.iconContainer}`}
+                >
+                  <StatIcon size={19} />
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="text-3xl font-black tracking-tight text-[var(--foreground)]">
+                  {typeof value === "number" ? value.toLocaleString() : value}
+                </div>
+                <p className="muted mt-1 text-[11px] font-medium">
+                  Platform aggregated metric
+                </p>
+              </div>
+            </article>
+          );
+        })}
       </div>
 
       {/* Redesigned Recent Activities Section */}
       <section className="panel overflow-hidden border border-[var(--border)] bg-[var(--surface)] shadow-sm">
         {/* Section Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-6 py-4 bg-[var(--background)]/40">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--background)]/40 px-6 py-4">
           <div className="flex items-center gap-2.5">
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] text-[var(--primary)]">
               <Activity size={18} />
@@ -202,11 +304,11 @@ function ManagementDashboardContent({
           </div>
         ) : (
           <div className="muted flex flex-col items-center justify-center gap-2.5 py-12 text-center text-sm">
-            <div className="grid h-12 w-12 place-items-center rounded-full bg-[var(--background)] border border-[var(--border)] text-[var(--muted)]">
+            <div className="grid h-12 w-12 place-items-center rounded-full border border-[var(--border)] bg-[var(--background)] text-[var(--muted)]">
               <Sparkles size={20} />
             </div>
             <strong>No recent activity</strong>
-            <p className="text-xs max-w-xs">
+            <p className="max-w-xs text-xs">
               Actions taken across courses, users, and settings will appear here automatically.
             </p>
           </div>
