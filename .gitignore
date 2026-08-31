@@ -76,3 +76,5 @@ backend/portal/tests.py
 start.py
 public/admin-learning-path-mockup.html
 public/mockup.html
+backend/portal/test_advisor_admin.py
+output/course-management-admin-plan.html

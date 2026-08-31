@@ -1,6 +1,6 @@
 from decimal import Decimal
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -39,7 +39,7 @@ class AdvisorSkillViewSet(viewsets.ModelViewSet):
 
 
 class CourseSkillViewSet(viewsets.ModelViewSet):
-    queryset = CourseSkill.objects.select_related("course", "skill")
+    queryset = CourseSkill.objects.select_related("course", "skill", "skill__field").order_by("course__title", "skill__name")
     serializer_class = CourseSkillSerializer
     permission_classes = [IsAdminRole]
 
@@ -95,7 +95,7 @@ class AdvisorAttemptViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AdvisorAttemptSerializer
     permission_classes = [IsAuthenticated]
     def get_queryset(self):
-        qs = QuizAttempt.objects.exclude(quiz__quiz_type=Quiz.QuizType.COURSE).select_related("quiz", "advisor_analysis", "advisor_analysis__strongest_field").prefetch_related(
+        qs = QuizAttempt.objects.exclude(quiz__quiz_type=Quiz.QuizType.COURSE).select_related("student", "quiz", "advisor_analysis", "advisor_analysis__strongest_field").prefetch_related(
             "advisor_analysis__recommendations__course",
             Prefetch(
                 "answers",
@@ -108,9 +108,51 @@ class AdvisorAttemptViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(student=self.request.user)
         state = self.request.query_params.get("status")
         quiz = self.request.query_params.get("quiz")
+        quiz_type = self.request.query_params.get("type")
+        search = self.request.query_params.get("search", "").strip()
         if quiz:
             qs = qs.filter(quiz_id=quiz)
-        return qs.filter(analysis_status=state).order_by("-completed_at") if state else qs.order_by("-completed_at")
+        if quiz_type:
+            qs = qs.filter(quiz__quiz_type=quiz_type)
+        if search:
+            qs = qs.filter(
+                Q(student__email__icontains=search)
+                | Q(student__first_name__icontains=search)
+                | Q(student__last_name__icontains=search)
+            )
+        if state:
+            states = [value.strip() for value in state.split(",") if value.strip()]
+            qs = qs.filter(analysis_status__in=states)
+        return qs.order_by("-completed_at")
+
+    @action(detail=False, methods=["get"], permission_classes=[IsAdminRole])
+    def summary(self, request):
+        advisor_attempts = QuizAttempt.objects.exclude(quiz__quiz_type=Quiz.QuizType.COURSE)
+        actionable = [
+            QuizAttempt.AnalysisStatus.SUBMITTED,
+            QuizAttempt.AnalysisStatus.ANALYSIS_FAILED,
+            QuizAttempt.AnalysisStatus.DRAFT_READY,
+        ]
+        recent = advisor_attempts.select_related("student", "quiz").order_by("-completed_at")[:5]
+        return Response({
+            "learning_fields": LearningField.objects.count(),
+            "active_skills": AdvisorSkill.objects.filter(is_active=True).count(),
+            "mapped_courses": CourseSkill.objects.values("course_id").distinct().count(),
+            "awaiting_review": advisor_attempts.filter(analysis_status__in=actionable).count(),
+            "recent_activity": [
+                {
+                    "id": attempt.pk,
+                    "student": attempt.student_id,
+                    "student_name": attempt.student.get_full_name().strip() or attempt.student.email.split("@", 1)[0],
+                    "student_email": attempt.student.email,
+                    "quiz_title": attempt.quiz.title,
+                    "quiz_type": attempt.quiz.quiz_type,
+                    "analysis_status": attempt.analysis_status,
+                    "completed_at": attempt.completed_at,
+                }
+                for attempt in recent
+            ],
+        })
 
     @action(detail=True, methods=["post"], permission_classes=[IsAdminRole])
     def analyze(self, request, pk=None):

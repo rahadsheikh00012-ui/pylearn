@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
-import { Compass, RefreshCw, Send, Sparkles } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Compass, Eye, Pencil, Plus, RefreshCw, Send, Sparkles, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useFeedbackDialog } from "@/components/feedback-dialog-provider";
-import { Empty, ErrorMessage, Loading, LoadingModal, PageHeader } from "@/components/ui";
+import { Empty, ErrorMessage, Loading, LoadingModal, Modal, PageHeader, Stat } from "@/components/ui";
 import { useApiData } from "@/hooks/use-api-data";
 import { api, jsonBody, unwrap } from "@/lib/api";
 import type { Course, Quiz } from "@/lib/types";
@@ -14,6 +14,9 @@ import { studentAdvisorStatusLabel } from "@/components/advisor/status";
 import type { AdvisorAttempt as Attempt } from "@/components/advisor/types";
 
 type Field = { id: number; name: string; description: string; is_active: boolean; skills: { id: number; name: string }[] };
+type Paged<T> = { count: number; next: string | null; previous: string | null; results: T[] };
+type Mapping = { id: number; course: number; course_title: string; field: number; field_name: string; skill: number; skill_name: string; coverage: number };
+type Summary = { learning_fields: number; active_skills: number; mapped_courses: number; awaiting_review: number; recent_activity: Array<Pick<Attempt, "id" | "student" | "student_name" | "student_email" | "quiz_title" | "quiz_type" | "analysis_status" | "completed_at">> };
 export function LearningPathPage() {
   const { user } = useAuth();
   return user?.role === "ADMIN" ? <AdminAdvisor /> : <StudentAdvisor />;
@@ -46,21 +49,219 @@ function StudentAdvisor() {
   </div>;
 }
 
+const adminTabs = [
+  ["overview", "Overview"], ["fields", "Fields & Skills"], ["mapping", "Course Mapping"],
+  ["reviews", "Review Queue"], ["results", "View Results"],
+] as const;
+type AdminTab = typeof adminTabs[number][0];
+
+function label(value?: string | null) { return value ? value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : "—"; }
+function date(value?: string | null) { return value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—"; }
+function attemptScore(attempt: Attempt) { return attempt.score === null ? "Pending" : `${attempt.score} / ${attempt.max_score}`; }
+
+function Pager({ page, count, onPage }: { page: number; count: number; onPage: (page: number) => void }) {
+  const pages = Math.max(1, Math.ceil(count / 25));
+  if (pages <= 1) return null;
+  return <nav className="mt-4 flex items-center justify-between" aria-label="Table pages">
+    <button className="btn btn-secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button>
+    <span className="muted text-sm">Page {page} of {pages}</span>
+    <button className="btn btn-secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next</button>
+  </nav>;
+}
+
 function AdminAdvisor() {
-  const { notify } = useFeedbackDialog();
-  const fields = useApiData<Field[] | { results: Field[] }>("/advisor/fields/");
-  const attempts = useApiData<Attempt[] | { results: Attempt[] }>("/advisor/attempts/");
-  const courses = useApiData<Course[] | { results: Course[] }>("/courses/");
+  const { notify, confirm } = useFeedbackDialog();
+  const [tab, setTab] = useState<AdminTab>("overview");
   const [busy, setBusy] = useState("");
-  const rows = useMemo(() => unwrap(attempts.data || []), [attempts.data]);
-  async function createField(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); try { setBusy("Creating field…"); await api("/advisor/fields/", { method: "POST", body: jsonBody({ name: data.get("name"), slug: String(data.get("name") || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), description: data.get("description"), is_active: true, order: 0 }) }); form.reset(); await fields.reload(); } catch (e) { void notify(e instanceof Error ? e.message : "Unable to create field", { tone: "error" }); } finally { setBusy(""); } }
-  async function createSkill(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); try { setBusy("Creating skill…"); await api("/advisor/skills/", { method: "POST", body: jsonBody({ field: Number(data.get("field")), name: data.get("name"), description: "", is_active: true }) }); form.reset(); await fields.reload(); } catch (e) { void notify(e instanceof Error ? e.message : "Unable to create skill", { tone: "error" }); } finally { setBusy(""); } }
-  async function mapCourse(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); try { setBusy("Mapping course skill…"); await api("/advisor/course-skills/", { method: "POST", body: jsonBody({ course: Number(data.get("course")), skill: Number(data.get("skill")), coverage: 100 }) }); form.reset(); void notify("Course skill mapped.", { tone: "success" }); } catch (e) { void notify(e instanceof Error ? e.message : "Unable to map course", { tone: "error" }); } finally { setBusy(""); } }
-  async function act(id: number, action: "analyze" | "publish") { try { setBusy(action === "analyze" ? "Asking AI to analyze the complete assessment…" : "Publishing result…"); await api(`/advisor/attempts/${id}/${action}/`, { method: "POST", body: "{}" }); await attempts.reload(); } catch (e) { void notify(e instanceof Error ? e.message : "Action failed", { tone: "error" }); } finally { setBusy(""); } }
-  async function saveDraft(event: FormEvent<HTMLFormElement>, id: number) { event.preventDefault(); const data = new FormData(event.currentTarget); const course = Number(data.get("course") || 0); try { setBusy("Saving reviewed draft…"); await api(`/advisor/attempts/${id}/draft/`, { method: "PATCH", body: jsonBody({ summary: data.get("summary"), strongest_field: Number(data.get("strongest_field") || 0) || null, strengths: String(data.get("strengths") || "").split("\n").map(v => v.trim()).filter(Boolean), gaps: String(data.get("gaps") || "").split("\n").map(v => v.trim()).filter(Boolean), recommendations: course ? [{ course, match_type: data.get("match_type"), reason: data.get("reason") }] : [] }) }); await attempts.reload(); } catch (e) { void notify(e instanceof Error ? e.message : "Unable to save draft", { tone: "error" }); } finally { setBusy(""); } }
-  if (fields.loading || attempts.loading || courses.loading) return <Loading variant="dashboard" />;
-  return <div className="space-y-6"><LoadingModal open={Boolean(busy)} title="AI Learning Path Advisor" message={busy} /><PageHeader title="AI Learning Path Advisor" description="Configure fields and review student assessments before publishing results." />
-    <section className="panel p-5"><h2 className="text-lg font-bold">Fields, skills, and course coverage</h2><form className="mt-4 grid gap-3 md:grid-cols-[1fr_2fr_auto]" onSubmit={createField}><input className="field" name="name" placeholder="Field name" required /><input className="field" name="description" placeholder="Description" /><button className="btn btn-primary">Add field</button></form><form className="mt-3 grid gap-3 md:grid-cols-[1fr_2fr_auto]" onSubmit={createSkill}><select className="field" name="field" required defaultValue=""><option value="" disabled>Choose field</option>{unwrap(fields.data || []).map(f => <option value={f.id} key={f.id}>{f.name}</option>)}</select><input className="field" name="name" placeholder="Skill name" required /><button className="btn btn-secondary">Add skill</button></form><form className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={mapCourse}><select className="field" name="course" required defaultValue=""><option value="" disabled>Choose course</option>{unwrap(courses.data || []).map(c => <option value={c.id} key={c.id}>{c.title}</option>)}</select><select className="field" name="skill" required defaultValue=""><option value="" disabled>Choose covered skill</option>{unwrap(fields.data || []).flatMap(f => f.skills.map(s => <option value={s.id} key={s.id}>{f.name} — {s.name}</option>))}</select><button className="btn btn-secondary">Map course</button></form><div className="mt-4 flex flex-wrap gap-2">{unwrap(fields.data || []).map(f => <span className="badge" key={f.id}>{f.name}: {f.skills.map(s => s.name).join(", ") || "no skills"}</span>)}</div></section>
-    <section className="space-y-3"><h2 className="text-xl font-bold">Assessment review queue</h2>{rows.length ? rows.map(a => <article className="panel p-5" key={a.id}><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><strong>{a.quiz_title}</strong><div className="mt-2 flex gap-2"><span className="badge">{a.quiz_type.replaceAll("_", " ")}</span><span className="badge">{a.analysis_status.replaceAll("_", " ")}</span></div>{a.analysis_error && <p className="error mt-2">{a.analysis_error}</p>}</div><div className="flex gap-2">{["SUBMITTED", "ANALYSIS_FAILED", "DRAFT_READY"].includes(a.analysis_status) && <button className="btn btn-secondary" onClick={() => void act(a.id, "analyze")}><RefreshCw size={15} />{a.analysis_status === "DRAFT_READY" ? "Rerun AI" : "Analyze with AI"}</button>}{a.analysis_status === "DRAFT_READY" && <button className="btn btn-primary" onClick={() => void act(a.id, "publish")}><Send size={15} />Publish</button>}</div></div>{a.analysis && (a.analysis_status === "DRAFT_READY" ? <form className="mt-4 grid gap-3 rounded-lg border border-[var(--border)] p-4" onSubmit={event => void saveDraft(event, a.id)}><label className="font-semibold text-sm">Summary<textarea className="field mt-1" name="summary" defaultValue={a.analysis.summary} rows={3} /></label><div className="grid gap-3 md:grid-cols-2"><label className="font-semibold text-sm">Strengths<textarea className="field mt-1" name="strengths" defaultValue={a.analysis.strengths.join("\n")} rows={4} /></label><label className="font-semibold text-sm">Gaps<textarea className="field mt-1" name="gaps" defaultValue={a.analysis.gaps.join("\n")} rows={4} /></label></div><p className="text-sm"><strong>AI strongest field:</strong> {a.analysis.strongest_field_name || "Needs admin correction"} · <strong>Level:</strong> {a.analysis.level || "—"}</p><button className="btn btn-secondary justify-self-start">Save reviewed draft</button></form> : <div className="mt-4 rounded-lg border border-[var(--border)] p-4"><p>{a.analysis.summary}</p>{a.analysis.strongest_field_name && <p className="mt-2"><strong>Strongest:</strong> {a.analysis.strongest_field_name}</p>}<p className="mt-2"><strong>Level:</strong> {a.analysis.level || "—"}</p></div>)}</article>) : <Empty message="The review queue is empty. Student Advisor attempts will appear here." />}</section>
+  const [fieldSearch, setFieldSearch] = useState("");
+  const [fieldModal, setFieldModal] = useState<Field | "new" | null>(null);
+  const [mappingModal, setMappingModal] = useState<Mapping | "new" | null>(null);
+  const [reviewModal, setReviewModal] = useState<Attempt | null>(null);
+  const [resultModal, setResultModal] = useState<Attempt | null>(null);
+  const [reviewSearch, setReviewSearch] = useState("");
+  const [reviewStatus, setReviewStatus] = useState("");
+  const [reviewType, setReviewType] = useState("");
+  const [reviewPage, setReviewPage] = useState(1);
+  const [resultSearch, setResultSearch] = useState("");
+  const [resultType, setResultType] = useState("");
+  const [resultPage, setResultPage] = useState(1);
+  const [mappingPage, setMappingPage] = useState(1);
+
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab") as AdminTab | null;
+    if (requested && adminTabs.some(([key]) => key === requested)) setTab(requested);
+  }, []);
+  function chooseTab(next: AdminTab) {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === "overview") url.searchParams.delete("tab"); else url.searchParams.set("tab", next);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }
+
+  const fields = useApiData<Field[] | Paged<Field>>("/advisor/fields/");
+  const courses = useApiData<Course[] | Paged<Course>>("/courses/");
+  const summary = useApiData<Summary>("/advisor/attempts/summary/");
+  const mappings = useApiData<Paged<Mapping>>(`/advisor/course-skills/?page=${mappingPage}`);
+  const reviewParams = new URLSearchParams({ page: String(reviewPage), status: reviewStatus || "SUBMITTED,ANALYSIS_FAILED,DRAFT_READY" });
+  if (reviewSearch) reviewParams.set("search", reviewSearch);
+  if (reviewType) reviewParams.set("type", reviewType);
+  const reviews = useApiData<Paged<Attempt>>(`/advisor/attempts/?${reviewParams}`);
+  const resultParams = new URLSearchParams({ page: String(resultPage), status: "PUBLISHED" });
+  if (resultSearch) resultParams.set("search", resultSearch);
+  if (resultType) resultParams.set("type", resultType);
+  const results = useApiData<Paged<Attempt>>(`/advisor/attempts/?${resultParams}`);
+  const fieldRows = useMemo(() => unwrap(fields.data || []).filter(item => `${item.name} ${item.description}`.toLowerCase().includes(fieldSearch.toLowerCase())), [fields.data, fieldSearch]);
+  const courseRows = unwrap(courses.data || []).filter(course => course.status === "PUBLISHED");
+
+  async function reloadWorkspace() { await Promise.all([fields.reload(), mappings.reload(), reviews.reload(), results.reload(), summary.reload()]); }
+  function handleTabKey(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? adminTabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + adminTabs.length) % adminTabs.length;
+    chooseTab(adminTabs[nextIndex][0]);
+    document.getElementById(`advisor-tab-${adminTabs[nextIndex][0]}`)?.focus();
+  }
+  async function run(task: string, action: () => Promise<void>) {
+    try { setBusy(task); await action(); }
+    catch (error) { void notify(error instanceof Error ? error.message : "Action failed.", { tone: "error" }); }
+    finally { setBusy(""); }
+  }
+  async function saveField(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const data = new FormData(event.currentTarget); const current = fieldModal === "new" ? null : fieldModal;
+    await run(current ? "Updating learning field…" : "Creating learning field…", async () => {
+      const name = String(data.get("name") || "");
+      await api(current ? `/advisor/fields/${current.id}/` : "/advisor/fields/", { method: current ? "PATCH" : "POST", body: jsonBody({ name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), description: data.get("description"), is_active: data.get("is_active") === "on", ...(!current ? { order: 0 } : {}) }) });
+      setFieldModal(null); await Promise.all([fields.reload(), summary.reload()]); void notify(`Learning field ${current ? "updated" : "created"}.`, { tone: "success" });
+    });
+  }
+  async function toggleField(item: Field) {
+    const accepted = await confirm(`${item.is_active ? "Deactivate" : "Activate"} ${item.name}?`, { confirmLabel: item.is_active ? "Deactivate" : "Activate" }); if (!accepted) return;
+    await run("Updating learning field…", async () => { await api(`/advisor/fields/${item.id}/`, { method: "PATCH", body: jsonBody({ is_active: !item.is_active }) }); await Promise.all([fields.reload(), summary.reload()]); });
+  }
+  async function removeField(item: Field) {
+    const accepted = await confirm(`Delete ${item.name} and its skills?`, { title: "Delete learning field", confirmLabel: "Delete", tone: "error" }); if (!accepted) return;
+    await run("Deleting learning field…", async () => { await api(`/advisor/fields/${item.id}/`, { method: "DELETE" }); await reloadWorkspace(); });
+  }
+  async function addSkill(event: FormEvent<HTMLFormElement>, field: Field) {
+    event.preventDefault(); const form = event.currentTarget; const data = new FormData(form);
+    await run("Adding skill…", async () => { await api("/advisor/skills/", { method: "POST", body: jsonBody({ field: field.id, name: data.get("name"), description: "", is_active: true }) }); form.reset(); await Promise.all([fields.reload(), summary.reload()]); setFieldModal(null); });
+  }
+  async function renameSkill(event: FormEvent<HTMLFormElement>, skill: Field["skills"][number]) {
+    event.preventDefault(); const name = String(new FormData(event.currentTarget).get("name") || "").trim(); if (!name || name === skill.name) return;
+    await run("Updating skill…", async () => { await api(`/advisor/skills/${skill.id}/`, { method: "PATCH", body: jsonBody({ name }) }); await fields.reload(); setFieldModal(null); });
+  }
+  async function removeSkill(skill: Field["skills"][number]) {
+    const accepted = await confirm(`Remove the skill ${skill.name}?`, { title: "Remove skill", confirmLabel: "Remove", tone: "error" }); if (!accepted) return;
+    await run("Removing skill…", async () => { await api(`/advisor/skills/${skill.id}/`, { method: "DELETE" }); await reloadWorkspace(); setFieldModal(null); });
+  }
+  async function saveMapping(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const data = new FormData(event.currentTarget); const current = mappingModal === "new" ? null : mappingModal;
+    await run(current ? "Updating course mapping…" : "Creating course mapping…", async () => {
+      await api(current ? `/advisor/course-skills/${current.id}/` : "/advisor/course-skills/", { method: current ? "PATCH" : "POST", body: jsonBody({ course: Number(data.get("course")), skill: Number(data.get("skill")), coverage: Number(data.get("coverage")) }) });
+      setMappingModal(null); await Promise.all([mappings.reload(), summary.reload()]); void notify(`Course mapping ${current ? "updated" : "created"}.`, { tone: "success" });
+    });
+  }
+  async function removeMapping(item: Mapping) {
+    const accepted = await confirm(`Remove the mapping between ${item.course_title} and ${item.skill_name}?`, { title: "Remove mapping", confirmLabel: "Remove", tone: "error" }); if (!accepted) return;
+    await run("Removing course mapping…", async () => { await api(`/advisor/course-skills/${item.id}/`, { method: "DELETE" }); await Promise.all([mappings.reload(), summary.reload()]); });
+  }
+  async function analyze(item: Attempt) {
+    await run(item.analysis_status === "ANALYSIS_FAILED" ? "Retrying AI analysis…" : "Running AI analysis…", async () => { await api(`/advisor/attempts/${item.id}/analyze/`, { method: "POST", body: "{}" }); await Promise.all([reviews.reload(), summary.reload()]); setReviewModal(null); void notify("AI analysis completed. Draft is ready for review.", { tone: "success" }); });
+  }
+  function draftPayload(form: HTMLFormElement) {
+    const data = new FormData(form); const course = Number(data.get("course") || 0);
+    return { summary: data.get("summary"), strongest_field: Number(data.get("strongest_field") || 0) || null, strengths: String(data.get("strengths") || "").split("\n").map(v => v.trim()).filter(Boolean), gaps: String(data.get("gaps") || "").split("\n").map(v => v.trim()).filter(Boolean), recommendations: course ? [{ course, match_type: data.get("match_type"), reason: data.get("reason") }] : [] };
+  }
+  async function saveReview(form: HTMLFormElement, publish = false) {
+    if (!reviewModal) return; const payload = draftPayload(form); const id = reviewModal.id;
+    if (publish) {
+      const accepted = await confirm(`Publish the reviewed result for ${reviewModal.student_name}? The student will be able to view it immediately.`, { title: "Publish advisor result", confirmLabel: "Publish", tone: "warning" });
+      if (!accepted) return;
+    }
+    await run(publish ? "Saving and publishing result…" : "Saving reviewed draft…", async () => {
+      await api(`/advisor/attempts/${id}/draft/`, { method: "PATCH", body: jsonBody(payload) });
+      if (publish) await api(`/advisor/attempts/${id}/publish/`, { method: "POST", body: "{}" });
+      setReviewModal(null); await Promise.all([reviews.reload(), results.reload(), summary.reload()]); void notify(publish ? "Result published." : "Reviewed draft saved.", { tone: "success" });
+    });
+  }
+
+  return <div className="space-y-6">
+    <LoadingModal open={Boolean(busy)} title="AI Learning Path Advisor" message={busy} />
+    <PageHeader title="AI Learning Path Advisor" description="Configure learning coverage, review AI analysis, and publish student results." />
+    <div className="panel flex gap-2 overflow-x-auto p-2" role="tablist" aria-label="AI Learning Path administration">
+      {adminTabs.map(([key, text], index) => <button id={`advisor-tab-${key}`} key={key} role="tab" aria-selected={tab === key} aria-controls={`advisor-panel-${key}`} tabIndex={tab === key ? 0 : -1} className={tab === key ? "btn btn-primary whitespace-nowrap" : "btn btn-secondary whitespace-nowrap"} onKeyDown={event => handleTabKey(event, index)} onClick={() => chooseTab(key)}>{text}</button>)}
+    </div>
+
+    <div id={`advisor-panel-${tab}`} role="tabpanel" aria-labelledby={`advisor-tab-${tab}`}>
+    {tab === "overview" && <OverviewTab summary={summary} onOpen={chooseTab} />}
+    {tab === "fields" && <section className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-bold">Fields & Skills Directory</h2><p className="muted text-sm">Manage the learning areas used by advisor assessments.</p></div><button className="btn btn-primary" onClick={() => setFieldModal("new")}><Plus size={16} />Add Learning Field</button></div>
+      <input className="field max-w-md" aria-label="Search learning fields" placeholder="Search fields or descriptions…" value={fieldSearch} onChange={event => setFieldSearch(event.target.value)} />
+      {fields.loading ? <Loading variant="table" /> : fields.error ? <ErrorMessage message={fields.error} /> : !fieldRows.length ? <Empty message="No learning fields match this search." /> : <>
+        <div className="panel table-wrap hidden md:block"><table><thead><tr><th>Learning field</th><th>Skills</th><th>Status</th><th>Actions</th></tr></thead><tbody>{fieldRows.map(item => <tr key={item.id}><td><strong>{item.name}</strong><div className="muted text-sm">{item.description || "No description"}</div></td><td>{item.skills.length ? item.skills.map(skill => skill.name).join(", ") : "No skills"}</td><td><span className="badge">{item.is_active ? "Active" : "Inactive"}</span></td><td><div className="flex gap-2"><button className="btn btn-secondary" onClick={() => setFieldModal(item)}><Pencil size={14} />Manage</button><button className="btn btn-secondary" onClick={() => void toggleField(item)}>{item.is_active ? "Deactivate" : "Activate"}</button><button className="btn btn-danger" aria-label={`Delete ${item.name}`} onClick={() => void removeField(item)}><Trash2 size={14} /></button></div></td></tr>)}</tbody></table></div>
+        <div className="grid gap-3 md:hidden">{fieldRows.map(item => <article className="panel p-4" key={item.id}><div className="flex justify-between gap-3"><strong>{item.name}</strong><span className="badge">{item.is_active ? "Active" : "Inactive"}</span></div><p className="muted mt-2 text-sm">{item.description || "No description"}</p><p className="mt-3 text-sm"><strong>Skills:</strong> {item.skills.map(skill => skill.name).join(", ") || "None"}</p><button className="btn btn-secondary mt-3" onClick={() => setFieldModal(item)}>Manage</button></article>)}</div>
+      </>}
+    </section>}
+
+    {tab === "mapping" && <MappingTab data={mappings} page={mappingPage} onPage={setMappingPage} onCreate={() => setMappingModal("new")} onEdit={setMappingModal} onRemove={removeMapping} />}
+    {tab === "reviews" && <AttemptsTab mode="reviews" data={reviews} page={reviewPage} search={reviewSearch} type={reviewType} status={reviewStatus} onSearch={value => { setReviewSearch(value); setReviewPage(1); }} onType={value => { setReviewType(value); setReviewPage(1); }} onStatus={value => { setReviewStatus(value); setReviewPage(1); }} onPage={setReviewPage} onAnalyze={analyze} onOpen={setReviewModal} />}
+    {tab === "results" && <AttemptsTab mode="results" data={results} page={resultPage} search={resultSearch} type={resultType} status="PUBLISHED" onSearch={value => { setResultSearch(value); setResultPage(1); }} onType={value => { setResultType(value); setResultPage(1); }} onStatus={() => undefined} onPage={setResultPage} onAnalyze={analyze} onOpen={setResultModal} />}
+    </div>
+
+    <FieldEditorModal value={fieldModal} onClose={() => setFieldModal(null)} onSubmit={saveField} onAddSkill={addSkill} onRenameSkill={renameSkill} onRemoveSkill={removeSkill} />
+    <MappingEditorModal value={mappingModal} fields={fieldRows.length ? fieldRows : unwrap(fields.data || [])} courses={courseRows} onClose={() => setMappingModal(null)} onSubmit={saveMapping} />
+    <ReviewModal attempt={reviewModal} fields={unwrap(fields.data || [])} courses={courseRows} onClose={() => setReviewModal(null)} onSubmit={saveReview} onRerun={analyze} />
+    <ResultModal attempt={resultModal} onClose={() => setResultModal(null)} />
   </div>;
+}
+
+function OverviewTab({ summary, onOpen }: { summary: ReturnType<typeof useApiData<Summary>>; onOpen: (tab: AdminTab) => void }) {
+  if (summary.loading) return <Loading variant="dashboard" />;
+  if (summary.error || !summary.data) return <ErrorMessage message={summary.error || "Unable to load advisor overview."} />;
+  const data = summary.data;
+  return <div className="space-y-5"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Learning Fields" value={data.learning_fields} /><Stat label="Active Skills" value={data.active_skills} /><Stat label="Mapped Courses" value={data.mapped_courses} /><Stat label="Awaiting Review" value={data.awaiting_review} /></div>
+    <section className="panel p-5"><div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">Recent Assessment Activity</h2><p className="muted text-sm">The latest advisor attempts across all students.</p></div><button className="btn btn-secondary" onClick={() => onOpen("reviews")}>Open queue</button></div>
+      {!data.recent_activity.length ? <div className="mt-4"><Empty message="No advisor assessment activity yet." /></div> : <div className="table-wrap mt-4"><table><thead><tr><th>Student</th><th>Assessment</th><th>Type</th><th>Status</th><th>Submitted</th></tr></thead><tbody>{data.recent_activity.map(item => <tr key={item.id}><td><strong>{item.student_name}</strong><div className="muted text-sm">{item.student_email}</div></td><td>{item.quiz_title}</td><td><span className="badge">{label(item.quiz_type)}</span></td><td><span className="badge">{label(item.analysis_status)}</span></td><td>{date(item.completed_at)}</td></tr>)}</tbody></table></div>}
+    </section></div>;
+}
+
+function MappingTab({ data, page, onPage, onCreate, onEdit, onRemove }: { data: ReturnType<typeof useApiData<Paged<Mapping>>>; page: number; onPage: (page: number) => void; onCreate: () => void; onEdit: (item: Mapping) => void; onRemove: (item: Mapping) => Promise<void> }) {
+  const rows = data.data?.results || [];
+  return <section className="space-y-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-bold">Course–Skill Coverage Mapping</h2><p className="muted text-sm">Connect published learning content to advisor skills.</p></div><button className="btn btn-primary" onClick={onCreate}><Plus size={16} />Create Mapping</button></div>
+    {data.loading ? <Loading variant="table" /> : data.error ? <ErrorMessage message={data.error} /> : !rows.length ? <Empty message="No course-skill mappings are available." /> : <><div className="panel table-wrap hidden md:block"><table><thead><tr><th>Course</th><th>Field</th><th>Skill</th><th>Coverage</th><th>Actions</th></tr></thead><tbody>{rows.map(item => <tr key={item.id}><td><strong>{item.course_title}</strong></td><td>{item.field_name}</td><td>{item.skill_name}</td><td>{item.coverage}%</td><td><div className="flex gap-2"><button className="btn btn-secondary" onClick={() => onEdit(item)}><Pencil size={14} />Edit</button><button className="btn btn-danger" onClick={() => void onRemove(item)}><Trash2 size={14} />Remove</button></div></td></tr>)}</tbody></table></div><div className="grid gap-3 md:hidden">{rows.map(item => <article className="panel p-4" key={item.id}><strong>{item.course_title}</strong><dl className="mt-3 grid grid-cols-2 gap-2 text-sm"><dt className="muted">Field</dt><dd>{item.field_name}</dd><dt className="muted">Skill</dt><dd>{item.skill_name}</dd><dt className="muted">Coverage</dt><dd>{item.coverage}%</dd></dl><button className="btn btn-secondary mt-3" onClick={() => onEdit(item)}>Edit mapping</button></article>)}</div><Pager page={page} count={data.data?.count || 0} onPage={onPage} /></>}
+  </section>;
+}
+
+function AttemptsTab({ mode, data, page, search, type, status, onSearch, onType, onStatus, onPage, onAnalyze, onOpen }: { mode: "reviews" | "results"; data: ReturnType<typeof useApiData<Paged<Attempt>>>; page: number; search: string; type: string; status: string; onSearch: (value: string) => void; onType: (value: string) => void; onStatus: (value: string) => void; onPage: (page: number) => void; onAnalyze: (item: Attempt) => Promise<void>; onOpen: (item: Attempt) => void }) {
+  const rows = data.data?.results || []; const resultsMode = mode === "results";
+  return <section className="space-y-4"><div><h2 className="text-xl font-bold">{resultsMode ? "Published Advisor Results" : "Assessment Review Queue"}</h2><p className="muted text-sm">{resultsMode ? "Inspect finalized learning-path results." : "Analyze, review, and publish student assessments."}</p></div>
+    <div className="panel grid gap-3 p-4 md:grid-cols-3"><input className="field" aria-label="Search students" placeholder="Search student name or email…" value={search} onChange={event => onSearch(event.target.value)} /><select className="field" aria-label="Assessment type" value={type} onChange={event => onType(event.target.value)}><option value="">All assessment types</option><option value="SKILL_DISCOVERY">Skill Discovery</option><option value="SKILL_DEVELOPMENT">Skill Development</option></select>{!resultsMode && <select className="field" aria-label="Review status" value={status} onChange={event => onStatus(event.target.value)}><option value="">All actionable statuses</option><option value="SUBMITTED">Submitted</option><option value="ANALYSIS_FAILED">Analysis Failed</option><option value="DRAFT_READY">Draft Ready</option></select>}</div>
+    {data.loading ? <Loading variant="table" /> : data.error ? <ErrorMessage message={data.error} /> : !rows.length ? <Empty message={resultsMode ? "No published advisor results match these filters." : "The review queue is empty."} /> : <><div className="panel table-wrap hidden lg:block"><table><thead><tr><th>Student</th><th>Assessment</th><th>Type</th><th>Score</th>{resultsMode ? <><th>Strongest field</th><th>Level</th><th>Published</th></> : <><th>Submitted</th><th>Status</th></>}<th>Action</th></tr></thead><tbody>{rows.map(item => <tr key={item.id}><td><strong>{item.student_name}</strong><div className="muted text-sm">{item.student_email}</div></td><td>{item.quiz_title}</td><td><span className="badge">{label(item.quiz_type)}</span></td><td>{attemptScore(item)}</td>{resultsMode ? <><td>{item.analysis?.strongest_field_name || "—"}</td><td>{label(item.analysis?.level)}</td><td>{date(item.published_at)}</td></> : <><td>{date(item.completed_at)}</td><td><span className="badge">{label(item.analysis_status)}</span></td></>}<td>{resultsMode || item.analysis_status === "DRAFT_READY" ? <button className="btn btn-primary" onClick={() => onOpen(item)}>{resultsMode ? <Eye size={15} /> : <Pencil size={15} />}{resultsMode ? "View Result" : "Review Draft"}</button> : <button className="btn btn-secondary" onClick={() => void onAnalyze(item)}><RefreshCw size={15} />{item.analysis_status === "ANALYSIS_FAILED" ? "Retry" : "Analyze"}</button>}</td></tr>)}</tbody></table></div>
+      <div className="grid gap-3 lg:hidden">{rows.map(item => <article className="panel p-4" key={item.id}><div className="flex items-start justify-between gap-3"><div><strong>{item.student_name}</strong><div className="muted text-sm">{item.student_email}</div></div><span className="badge">{label(item.analysis_status)}</span></div><h3 className="mt-3 font-semibold">{item.quiz_title}</h3><p className="muted mt-1 text-sm">{label(item.quiz_type)} · {attemptScore(item)}</p><button className="btn btn-primary mt-4" onClick={() => item.analysis_status === "DRAFT_READY" || resultsMode ? onOpen(item) : void onAnalyze(item)}>{resultsMode ? "View Result" : item.analysis_status === "DRAFT_READY" ? "Review Draft" : "Analyze"}</button></article>)}</div><Pager page={page} count={data.data?.count || 0} onPage={onPage} /></>}
+  </section>;
+}
+
+function FieldEditorModal({ value, onClose, onSubmit, onAddSkill, onRenameSkill, onRemoveSkill }: { value: Field | "new" | null; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>; onAddSkill: (event: FormEvent<HTMLFormElement>, field: Field) => Promise<void>; onRenameSkill: (event: FormEvent<HTMLFormElement>, skill: Field["skills"][number]) => Promise<void>; onRemoveSkill: (skill: Field["skills"][number]) => Promise<void> }) {
+  const item = value === "new" ? null : value;
+  return <Modal open={Boolean(value)} title={item ? `Manage Field: ${item.name}` : "Add Learning Field"} onCloseAction={onClose} size="wide"><form className="grid gap-4" onSubmit={event => void onSubmit(event)}><label className="text-sm font-semibold">Field name<input className="field mt-1" name="name" required defaultValue={item?.name || ""} /></label><label className="text-sm font-semibold">Description<textarea className="field mt-1" name="description" rows={3} defaultValue={item?.description || ""} /></label><label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" name="is_active" defaultChecked={item?.is_active ?? true} />Active</label><div className="flex justify-end gap-2"><button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary">{item ? "Save Changes" : "Create Field"}</button></div></form>
+    {item && <section className="mt-6 border-t border-[var(--border)] pt-5"><h3 className="font-bold">Skills</h3><form className="mt-3 flex gap-2" onSubmit={event => void onAddSkill(event, item)}><input className="field" name="name" required placeholder="New skill name" /><button className="btn btn-secondary"><Plus size={15} />Add</button></form><div className="mt-3 space-y-2">{item.skills.length ? item.skills.map(skill => <form className="flex items-center gap-2 rounded-lg border border-[var(--border)] p-3" key={skill.id} onSubmit={event => void onRenameSkill(event, skill)}><input className="field" name="name" required defaultValue={skill.name} aria-label={`Rename ${skill.name}`} /><button className="btn btn-secondary">Save</button><button type="button" className="btn btn-danger" onClick={() => void onRemoveSkill(skill)}>Remove</button></form>) : <p className="muted text-sm">No skills attached yet.</p>}</div></section>}
+  </Modal>;
+}
+
+function MappingEditorModal({ value, fields, courses, onClose, onSubmit }: { value: Mapping | "new" | null; fields: Field[]; courses: Course[]; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void> }) {
+  const item = value === "new" ? null : value; const [fieldId, setFieldId] = useState(0);
+  const defaultFieldId = item?.field || fields[0]?.id || 0;
+  useEffect(() => { setFieldId(defaultFieldId); }, [value, defaultFieldId]);
+  const skills = fields.find(field => field.id === fieldId)?.skills || [];
+  return <Modal open={Boolean(value)} title={item ? "Edit Course–Skill Mapping" : "Create Course–Skill Mapping"} onCloseAction={onClose}><form className="grid gap-4" onSubmit={event => void onSubmit(event)}><label className="text-sm font-semibold">Course<select className="field mt-1" name="course" required defaultValue={item?.course || ""}><option value="" disabled>Select course</option>{courses.map(course => <option key={course.id} value={course.id}>{course.title}</option>)}</select></label><label className="text-sm font-semibold">Learning field<select className="field mt-1" required value={fieldId || ""} onChange={event => setFieldId(Number(event.target.value))}><option value="" disabled>Select field</option>{fields.filter(field => field.is_active).map(field => <option key={field.id} value={field.id}>{field.name}</option>)}</select></label><label className="text-sm font-semibold">Skill<select className="field mt-1" name="skill" required defaultValue={item?.skill || ""} key={`${fieldId}-${item?.id || "new"}`}><option value="" disabled>Select skill</option>{skills.map(skill => <option key={skill.id} value={skill.id}>{skill.name}</option>)}</select></label><label className="text-sm font-semibold">Coverage percentage<input className="field mt-1" name="coverage" type="number" min={1} max={100} required defaultValue={item?.coverage || 100} /></label><div className="flex justify-end gap-2"><button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary">Save Mapping</button></div></form></Modal>;
+}
+
+function ReviewModal({ attempt, fields, courses, onClose, onSubmit, onRerun }: { attempt: Attempt | null; fields: Field[]; courses: Course[]; onClose: () => void; onSubmit: (form: HTMLFormElement, publish?: boolean) => Promise<void>; onRerun: (attempt: Attempt) => Promise<void> }) {
+  const recommendation = attempt?.analysis?.recommendations[0];
+  return <Modal open={Boolean(attempt)} title={`Review AI Analysis${attempt ? ` — ${attempt.student_name}` : ""}`} onCloseAction={onClose} size="wide">{attempt && attempt.analysis && <form className="grid gap-4" onSubmit={event => { event.preventDefault(); void onSubmit(event.currentTarget); }}><div className="rounded-lg border border-[var(--border)] p-3 text-sm"><strong>{attempt.quiz_title}</strong><div className="muted mt-1">{attemptScore(attempt)} · {label(attempt.quiz_type)}</div></div><label className="text-sm font-semibold">Summary<textarea className="field mt-1" name="summary" rows={4} required defaultValue={attempt.analysis.summary} /></label><label className="text-sm font-semibold">Strongest field<select className="field mt-1" name="strongest_field" defaultValue={attempt.analysis.strongest_field || ""}><option value="">No strongest field</option>{fields.map(field => <option key={field.id} value={field.id}>{field.name}</option>)}</select></label><div className="grid gap-4 md:grid-cols-2"><label className="text-sm font-semibold">Strengths<textarea className="field mt-1" name="strengths" rows={5} defaultValue={attempt.analysis.strengths.join("\n")} /></label><label className="text-sm font-semibold">Gaps<textarea className="field mt-1" name="gaps" rows={5} defaultValue={attempt.analysis.gaps.join("\n")} /></label></div><div className="grid gap-4 md:grid-cols-2"><label className="text-sm font-semibold">Recommended course<select className="field mt-1" name="course" defaultValue={recommendation?.course || ""}><option value="">No recommendation</option>{courses.map(course => <option key={course.id} value={course.id}>{course.title}</option>)}</select></label><label className="text-sm font-semibold">Match type<select className="field mt-1" name="match_type" defaultValue={recommendation?.match_type || "EXACT_MATCH"}><option value="EXACT_MATCH">Exact match</option><option value="BEST_RELATED">Best related</option><option value="ADVANCED">Advanced</option></select></label></div><label className="text-sm font-semibold">Recommendation reason<textarea className="field mt-1" name="reason" rows={3} defaultValue={recommendation?.reason || ""} /></label><div className="flex flex-wrap justify-between gap-2"><button type="button" className="btn btn-secondary" onClick={() => void onRerun(attempt)}><RefreshCw size={15} />Rerun AI</button><div className="flex gap-2"><button className="btn btn-secondary">Save Draft</button><button type="button" className="btn btn-primary" onClick={event => { const form = event.currentTarget.form; if (form) void onSubmit(form, true); }}><Send size={15} />Save & Publish</button></div></div></form>}</Modal>;
+}
+
+function ResultModal({ attempt, onClose }: { attempt: Attempt | null; onClose: () => void }) {
+  const analysis = attempt?.analysis;
+  return <Modal open={Boolean(attempt)} title={`Published Advisor Result${attempt ? ` — ${attempt.student_name}` : ""}`} onCloseAction={onClose} size="wide">{attempt && analysis && <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border border-[var(--border)] p-3"><span className="muted text-sm">Assessment</span><strong className="mt-1 block">{attempt.quiz_title}</strong></div><div className="rounded-lg border border-[var(--border)] p-3"><span className="muted text-sm">Score</span><strong className="mt-1 block">{attemptScore(attempt)} ({attempt.percentage}%)</strong></div><div className="rounded-lg border border-[var(--border)] p-3"><span className="muted text-sm">Published</span><strong className="mt-1 block">{date(attempt.published_at)}</strong></div></div><section><h3 className="font-bold">Summary</h3><p className="mt-2">{analysis.summary || "No summary provided."}</p></section><div className="grid gap-4 md:grid-cols-2"><section className="rounded-lg border border-[var(--border)] p-4"><h3 className="font-bold">Assessment profile</h3><p className="mt-2"><strong>Strongest field:</strong> {analysis.strongest_field_name || "—"}</p><p className="mt-2"><strong>Strongest skills:</strong> {analysis.strongest_skill_names.join(", ") || "—"}</p><p className="mt-2"><strong>Level:</strong> {label(analysis.level)}</p></section><section className="rounded-lg border border-[var(--border)] p-4"><h3 className="font-bold">Strengths and gaps</h3><p className="mt-2"><strong>Strengths:</strong> {analysis.strengths.join(", ") || "—"}</p><p className="mt-2"><strong>Gaps:</strong> {analysis.gaps.join(", ") || "—"}</p></section></div>{analysis.field_scores?.length > 0 && <section><h3 className="font-bold">Field scores</h3><div className="mt-2 grid gap-2 sm:grid-cols-2">{analysis.field_scores.map((score, index) => <div className="rounded-lg border border-[var(--border)] p-3" key={`${score.field || index}`}><strong>{score.field_name || `Field ${score.field || index + 1}`}</strong><span className="float-right">{score.percentage ?? score.score ?? 0}%</span></div>)}</div></section>}<section><h3 className="font-bold">Course recommendations</h3><div className="mt-2"><AdvisorRecommendationCards recommendations={analysis.recommendations} /></div></section><section><h3 className="font-bold">Submitted answers</h3><div className="mt-3 space-y-3">{attempt.answers.length ? attempt.answers.map(answer => <article className="rounded-lg border border-[var(--border)] p-4" key={answer.question_id}><strong>{answer.prompt}</strong><p className="mt-2"><span className="muted">Submitted:</span> {answer.submitted_answer || "No answer"}</p>{answer.correct_answer !== null && <p className="mt-1"><span className="muted">Correct answer:</span> {answer.correct_answer}</p>}<p className="mt-1"><span className="muted">Points:</span> {answer.awarded_points} / {answer.max_points}</p>{answer.ai_feedback && <p className="mt-2 rounded-lg bg-[var(--background)] p-3 text-sm">{answer.ai_feedback}</p>}</article>) : <p className="muted">No answer details available.</p>}</div></section></div>}</Modal>;
 }

@@ -12,6 +12,7 @@ export type AdvisorAnalysis = {
   strongest_field_name?: string | null;
   strongest_skills: number[];
   strongest_skill_names: string[];
+  field_scores: Array<{ field?: number; field_name?: string; score?: number; percentage?: number }>;
   strengths: string[];
   gaps: string[];
   level?: string;
@@ -38,6 +39,9 @@ export type AdvisorAnswer = {
 
 export type AdvisorAttempt = {
   id: number;
+  student?: number | null;
+  student_name?: string | null;
+  student_email?: string | null;
   quiz: number;
   quiz_title: string;
   quiz_type: string;

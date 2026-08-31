@@ -19,9 +19,29 @@ class LearningFieldSerializer(serializers.ModelSerializer):
 class CourseSkillSerializer(serializers.ModelSerializer):
     course_title = serializers.CharField(source="course.title", read_only=True)
     skill_name = serializers.CharField(source="skill.name", read_only=True)
+    field = serializers.IntegerField(source="skill.field_id", read_only=True)
+    field_name = serializers.CharField(source="skill.field.name", read_only=True)
+
+    def validate_coverage(self, value):
+        if not 1 <= value <= 100:
+            raise serializers.ValidationError("Coverage must be between 1 and 100 percent.")
+        return value
+
+    def validate(self, attrs):
+        course = attrs.get("course", getattr(self.instance, "course", None))
+        skill = attrs.get("skill", getattr(self.instance, "skill", None))
+        if course and skill:
+            duplicate = CourseSkill.objects.filter(course=course, skill=skill)
+            if self.instance:
+                duplicate = duplicate.exclude(pk=self.instance.pk)
+            if duplicate.exists():
+                raise serializers.ValidationError({"detail": "This course is already mapped to the selected skill."})
+        return attrs
+
     class Meta:
         model = CourseSkill
-        fields = ["id", "course", "course_title", "skill", "skill_name", "coverage"]
+        fields = ["id", "course", "course_title", "field", "field_name", "skill", "skill_name", "coverage"]
+        validators = []
 
 
 class RecommendationSerializer(serializers.ModelSerializer):
@@ -79,6 +99,9 @@ class PublishedAdvisorAnswerSerializer(serializers.Serializer):
 
 
 class AdvisorAttemptSerializer(serializers.ModelSerializer):
+    student = serializers.SerializerMethodField()
+    student_name = serializers.SerializerMethodField()
+    student_email = serializers.SerializerMethodField()
     quiz_title = serializers.CharField(source="quiz.title", read_only=True)
     quiz_type = serializers.CharField(source="quiz.quiz_type", read_only=True)
     analysis = serializers.SerializerMethodField()
@@ -89,7 +112,22 @@ class AdvisorAttemptSerializer(serializers.ModelSerializer):
     percentage = serializers.SerializerMethodField()
     class Meta:
         model = QuizAttempt
-        fields = ["id", "quiz", "quiz_title", "quiz_type", "score", "max_score", "percentage", "analysis_status", "analysis_error", "completed_at", "analyzed_at", "published_at", "analysis", "answers"]
+        fields = ["id", "student", "student_name", "student_email", "quiz", "quiz_title", "quiz_type", "score", "max_score", "percentage", "analysis_status", "analysis_error", "completed_at", "analyzed_at", "published_at", "analysis", "answers"]
+
+    def _admin_request(self):
+        request = self.context.get("request")
+        return bool(request and request.user.role == "ADMIN")
+
+    def get_student(self, obj):
+        return obj.student_id if self._admin_request() else None
+
+    def get_student_name(self, obj):
+        if not self._admin_request():
+            return None
+        return obj.student.get_full_name().strip() or obj.student.email.split("@", 1)[0]
+
+    def get_student_email(self, obj):
+        return obj.student.email if self._admin_request() else None
 
     def _can_view_result(self, obj):
         request = self.context.get("request")
