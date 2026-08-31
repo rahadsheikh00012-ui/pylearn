@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   Calendar,
   CheckCircle,
@@ -41,6 +42,21 @@ const bdtFormatter = new Intl.NumberFormat("en-BD", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 2,
 });
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+const AVATAR_GRADIENTS = [
+  "from-indigo-600 to-blue-600",
+  "from-emerald-500 to-teal-700",
+  "from-amber-500 to-orange-600",
+  "from-purple-600 to-violet-700",
+  "from-rose-500 to-pink-600",
+  "from-cyan-600 to-sky-700",
+];
 
 export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) {
   const { data: instructors, loading, error } = useApiData<InstructorListItem[]>(
@@ -251,81 +267,109 @@ export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) 
             </div>
           </div>
 
-          {/* Instructors Grid */}
+          {/* Instructors Table */}
           {loading ? (
-            <Loading variant="list" />
+            <Loading variant="table" />
           ) : error ? (
             <ErrorMessage message={error} />
           ) : filteredInstructors.length === 0 ? (
             <Empty message={instructorList.length === 0 ? "No active instructors found." : "No instructors match your search criteria."} />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredInstructors.map((instructor) => (
-                <article
-                  key={instructor.id}
-                  className="panel p-5 flex flex-col justify-between hover:border-[var(--primary)] transition-all cursor-pointer group"
-                  onClick={() => setSelectedInstructorId(instructor.id)}
-                >
-                  <div className="space-y-4">
-                    {/* Header with Avatar */}
-                    <div className="flex items-start gap-3.5">
-                      {instructor.avatar ? (
-                        <img
-                          src={instructor.avatar}
-                          alt=""
-                          className="h-12 w-12 rounded-full object-cover border border-[var(--border)] shrink-0"
-                        />
-                      ) : (
-                        <div className="grid h-12 w-12 place-items-center rounded-full bg-[color-mix(in_srgb,var(--primary)_15%,transparent)] text-[var(--primary)] font-bold text-base shrink-0">
-                          {instructor.name.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-bold text-base truncate group-hover:text-[var(--primary)] transition-colors">
-                          {instructor.name}
-                        </h3>
-                        <p className="text-xs muted truncate flex items-center gap-1.5 mt-0.5">
-                          <Mail size={12} className="shrink-0" />
-                          {instructor.email}
-                        </p>
-                        <span className="badge mt-2 text-xs">
+            <div className="panel table-wrap overflow-hidden">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--border)] text-xs uppercase tracking-wider text-[var(--muted)]">
+                    <th className="py-3.5 px-4 font-semibold">INSTRUCTOR</th>
+                    <th className="py-3.5 px-4 font-semibold">DEPARTMENT</th>
+                    <th className="py-3.5 px-4 font-semibold">TOTAL COURSES</th>
+                    <th className="py-3.5 px-4 font-semibold">PUBLISHED</th>
+                    <th className="py-3.5 px-4 font-semibold">TOTAL STUDENTS</th>
+                    <th className="py-3.5 px-4 font-semibold">STATUS</th>
+                    <th className="py-3.5 px-4 font-semibold text-right">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {filteredInstructors.map((instructor, idx) => {
+                    const gradientClass = AVATAR_GRADIENTS[idx % AVATAR_GRADIENTS.length];
+                    const initials = getInitials(instructor.name);
+                    return (
+                      <tr
+                        key={instructor.id}
+                        tabIndex={0}
+                        aria-label={`View portfolio for ${instructor.name}`}
+                        className="cursor-pointer transition-colors hover:bg-[var(--background)] focus-visible:outline-2 focus-visible:outline-[var(--primary)] focus-visible:outline-offset-[-2px]"
+                        onClick={() => setSelectedInstructorId(instructor.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelectedInstructorId(instructor.id);
+                          }
+                        }}
+                      >
+                        <td className="py-4 px-4">
+                          <div className="flex items-center gap-3.5">
+                            {instructor.avatar ? (
+                              <img
+                                src={instructor.avatar}
+                                alt=""
+                                className="h-10 w-10 rounded-full object-cover border border-[var(--border)] shrink-0"
+                              />
+                            ) : (
+                              <div
+                                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-br ${gradientClass} text-white font-bold text-sm shadow-sm`}
+                              >
+                                {initials}
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <strong className="block font-bold text-[var(--foreground)] truncate">
+                                {instructor.name}
+                              </strong>
+                              <span className="muted block text-xs truncate">{instructor.email}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-4 px-4 font-semibold text-[var(--foreground)]">
                           {instructor.department || "General Faculty"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Stats strip */}
-                    <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[var(--border)] text-center">
-                      <div className="p-2 rounded-lg bg-[var(--background)]">
-                        <span className="block text-xs muted">Courses</span>
-                        <strong className="text-base font-bold">{instructor.course_count}</strong>
-                      </div>
-                      <div className="p-2 rounded-lg bg-[var(--background)]">
-                        <span className="block text-xs muted">Published</span>
-                        <strong className="text-base font-bold text-[var(--success)]">
-                          {instructor.published_count}
-                        </strong>
-                      </div>
-                      <div className="p-2 rounded-lg bg-[var(--background)]">
-                        <span className="block text-xs muted">Students</span>
-                        <strong className="text-base font-bold text-[var(--primary)]">
-                          {instructor.student_count}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-4 mt-4 border-t border-[var(--border)] flex justify-end">
-                    <button
-                      type="button"
-                      className="btn btn-secondary text-xs w-full inline-flex items-center justify-center gap-2 group-hover:btn-primary"
-                    >
-                      <Eye size={14} />
-                      Inspect Courses
-                    </button>
-                  </div>
-                </article>
-              ))}
+                        </td>
+                        <td className="py-4 px-4 font-bold text-[var(--foreground)]">
+                          {instructor.course_count} {instructor.course_count === 1 ? "course" : "courses"}
+                        </td>
+                        <td className="py-4 px-4">
+                          <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold bg-[color-mix(in_srgb,var(--success)_12%,transparent)] text-[var(--success)] border border-[color-mix(in_srgb,var(--success)_25%,transparent)] whitespace-nowrap">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)] shrink-0" />
+                            {instructor.published_count} Active
+                          </span>
+                        </td>
+                        <td className="py-4 px-4">
+                          <div className="text-sm">
+                            <strong className="block font-bold text-[var(--foreground)]">{instructor.student_count}</strong>
+                            <span className="muted text-xs block">enrolled</span>
+                          </div>
+                        </td>
+                        <td className="py-4 px-4">
+                          <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold bg-[color-mix(in_srgb,var(--success)_12%,transparent)] text-[var(--success)] border border-[color-mix(in_srgb,var(--success)_25%,transparent)] whitespace-nowrap">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)] shrink-0" />
+                            Active
+                          </span>
+                        </td>
+                        <td className="py-4 px-4 text-right">
+                          <button
+                            type="button"
+                            className="btn btn-secondary text-xs font-semibold inline-flex items-center gap-1.5 hover:btn-primary whitespace-nowrap"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedInstructorId(instructor.id);
+                            }}
+                          >
+                            View Portfolio <ArrowRight size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

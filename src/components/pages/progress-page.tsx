@@ -1,7 +1,6 @@
 "use client";
 
-import { KeyboardEvent, useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { KeyboardEvent, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import type { User } from "@/lib/types";
 import { Empty, ErrorMessage, Loading, Modal, PageHeader, Stat } from "@/components/ui";
@@ -10,7 +9,7 @@ import { useApiData } from "@/hooks/use-api-data";
 type CourseProgress = { course_id: number; course_code: string; title: string; completion: number; completed_materials: number; total_materials: number; quizzes_passed: number; quiz_total: number; certificate_eligible: boolean; certificate_number?: string | null };
 type Progress = {
   student: User; courses: CourseProgress[]; quiz_average: number;
-  weak_topics: { attempt_id: number; quiz_id: number; quiz_title: string; course_title: string; incorrect_count: number; questions: { question_id: number; prompt: string; topic: string; submitted_answer: string; correct_answer: string }[] }[];
+  weak_topics?: { attempt_id: number; quiz_id: number; quiz_title: string; course_title: string; incorrect_count: number; questions: { question_id: number; prompt: string; topic: string; submitted_answer: string; correct_answer: string }[] }[];
 };
 type StudentProgressSummary = { student: User; enrolled_courses: number; completed_materials: number; total_materials: number; quizzes_passed: number; quiz_total: number; certificates_eligible: number; certificates_issued: number; overall_completion: number; status: "ON_TRACK" | "NEEDS_ATTENTION" };
 
@@ -20,49 +19,25 @@ function initials(user: User) {
 }
 
 function ProgressReport({ report }: { report: Progress }) {
-  const [expandedWeakQuiz, setExpandedWeakQuiz] = useState<number | null>(null);
   const eligibleCertificates = report.courses.filter(course => course.certificate_eligible || course.certificate_number).length;
   const issuedCertificates = report.courses.filter(course => course.certificate_number).length;
-  useEffect(() => setExpandedWeakQuiz(null), [report.student.id]);
 
   return <div className="space-y-6">
-    <div className="grid-cards"><Stat label="Quiz Average" value={`${Number(report.quiz_average).toFixed(1)}%`} /><Stat label="Identified Weak Topics" value={report.weak_topics.length} /><Stat label="Certificate Eligibility" value={`${eligibleCertificates} / ${report.courses.length} eligible${issuedCertificates ? ` · ${issuedCertificates} issued` : ""}`} /></div>
-    <div className="grid items-start gap-6 lg:grid-cols-2">
-      <section className="panel p-6">
-        <h3 className="mb-4 text-xl font-bold">Course Completion</h3>
-        {report.courses.length ? <div className="space-y-5">{report.courses.map(course => <div className="border-b border-[var(--border)] pb-5 last:border-0 last:pb-0" key={course.course_id}>
-          <div className="mb-2 flex items-end justify-between gap-3"><div><span className="badge">{course.course_code}</span><strong className="mt-2 block">{course.title}</strong></div><span className="font-bold text-[var(--primary)]">{course.completion}%</span></div>
-          <progress className="h-2.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--background)] [&::-webkit-progress-value]:bg-[var(--primary)] [&::-moz-progress-bar]:bg-[var(--primary)]" value={course.completion} max="100" aria-label={`${course.title} completion`} />
-          <div className="muted mt-1.5 text-xs font-medium">{course.completed_materials} of {course.total_materials} materials completed</div>
-          <div className="muted mt-1 text-xs font-medium">{course.quizzes_passed} of {course.quiz_total} required quizzes passed</div>
-          <span className="badge mt-2">{course.certificate_number ? "Certificate issued" : course.certificate_eligible ? "Certificate eligible" : "Not yet certificate eligible"}</span>
-        </div>)}</div> : <div className="muted py-4 text-center text-sm">No course data available.</div>}
-      </section>
-      <section className="panel p-6">
-        <h3 className="mb-4 text-xl font-bold">Weak Topics</h3>
-        {report.weak_topics.length ? <div className="space-y-3">{report.weak_topics.map(quiz => {
-          const expanded = expandedWeakQuiz === quiz.attempt_id;
-          return <div className="rounded-lg border border-[var(--border)] bg-[var(--background)]" key={quiz.attempt_id}>
-            <button type="button" className="flex w-full items-center justify-between gap-3 p-4 text-left" aria-expanded={expanded} onClick={() => setExpandedWeakQuiz(expanded ? null : quiz.attempt_id)}>
-              <span className="min-w-0"><strong className="block truncate">{quiz.quiz_title}</strong>{quiz.course_title && <span className="muted mt-1 block text-sm">{quiz.course_title}</span>}</span>
-              <span className="flex shrink-0 items-center gap-2"><span className="badge">{quiz.incorrect_count} incorrect</span><ChevronDown className={`text-[var(--muted)] transition-transform ${expanded ? "rotate-180" : ""}`} size={18} aria-hidden="true" /></span>
-            </button>
-            {expanded && <div className="space-y-4 border-t border-[var(--border)] p-4">{quiz.questions.map(question => <article className="space-y-2" key={question.question_id}>
-              <div className="text-sm font-semibold">{question.prompt}</div><div className="grid gap-2 text-sm md:grid-cols-2">
-                <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-3"><div className="muted text-xs font-semibold uppercase">Submitted answer</div><div className="mt-1">{question.submitted_answer || "No answer submitted"}</div></div>
-                <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-3"><div className="muted text-xs font-semibold uppercase">Correct answer</div><div className="mt-1">{question.correct_answer || "No answer recorded"}</div></div>
-              </div>
-            </article>)}</div>}
-          </div>;
-        })}</div> : <div className="muted py-4 text-center text-sm">Great job! No specific weak topics identified yet.</div>}
-      </section>
-    </div>
+    <div className="grid-cards"><Stat label="Quiz Average" value={`${Number(report.quiz_average).toFixed(1)}%`} /><Stat label="Certificate Eligibility" value={`${eligibleCertificates} / ${report.courses.length} eligible${issuedCertificates ? ` · ${issuedCertificates} issued` : ""}`} /></div>
+    <section className="panel p-6">
+      <h3 className="mb-4 text-xl font-bold">Course Completion</h3>
+      {report.courses.length ? <div className="space-y-5">{report.courses.map(course => <div className="border-b border-[var(--border)] pb-5 last:border-0 last:pb-0" key={course.course_id}>
+        <div className="mb-2 flex items-end justify-between gap-3"><div><span className="badge">{course.course_code}</span><strong className="mt-2 block">{course.title}</strong></div><span className="font-bold text-[var(--primary)]">{course.completion}%</span></div>
+        <progress className="h-2.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--background)] [&::-webkit-progress-value]:bg-[var(--primary)] [&::-moz-progress-bar]:bg-[var(--primary)]" value={course.completion} max="100" aria-label={`${course.title} completion`} />
+        <div className="muted mt-1.5 text-xs font-medium">{course.completed_materials} of {course.total_materials} materials completed</div>
+        <div className="muted mt-1 text-xs font-medium">{course.quizzes_passed} of {course.quiz_total} required quizzes passed</div>
+        <span className="badge mt-2">{course.certificate_number ? "Certificate issued" : course.certificate_eligible ? "Certificate eligible" : "Not yet certificate eligible"}</span>
+      </div>)}</div> : <div className="muted py-4 text-center text-sm">No course data available.</div>}
+    </section>
   </div>;
 }
 
-function CourseProgressDetails({ course, report }: { course: CourseProgress; report: Progress }) {
-  const [expandedWeakQuiz, setExpandedWeakQuiz] = useState<number | null>(null);
-  const weakTopics = report.weak_topics.filter(topic => topic.course_title === course.title);
+function CourseProgressDetails({ course }: { course: CourseProgress; report?: Progress }) {
   return <div className="space-y-6">
     <div><span className="badge">{course.course_code}</span><h3 className="mt-2 text-xl font-bold">{course.title}</h3></div>
     <div className="grid-cards">
@@ -74,20 +49,6 @@ function CourseProgressDetails({ course, report }: { course: CourseProgress; rep
       <div className="mb-2 flex items-center justify-between gap-3"><h3 className="font-bold">Overall Progress</h3><strong className="text-[var(--primary)]">{course.completion}%</strong></div>
       <progress className="h-2.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--background)] [&::-webkit-progress-value]:bg-[var(--primary)] [&::-moz-progress-bar]:bg-[var(--primary)]" value={course.completion} max="100" aria-label={`${course.title} completion`} />
       <span className="badge mt-3">{course.certificate_number ? "Certificate issued" : course.certificate_eligible ? "Certificate eligible" : "Not yet certificate eligible"}</span>
-    </section>
-    <section className="panel p-6">
-      <h3 className="mb-4 text-xl font-bold">Weak Topics</h3>
-      {weakTopics.length ? <div className="space-y-3">{weakTopics.map(quiz => {
-        const expanded = expandedWeakQuiz === quiz.attempt_id;
-        return <div className="rounded-lg border border-[var(--border)] bg-[var(--background)]" key={quiz.attempt_id}>
-          <button type="button" className="flex w-full items-center justify-between gap-3 p-4 text-left" aria-expanded={expanded} onClick={() => setExpandedWeakQuiz(expanded ? null : quiz.attempt_id)}>
-            <strong>{quiz.quiz_title}</strong><span className="flex items-center gap-2"><span className="badge">{quiz.incorrect_count} incorrect</span><ChevronDown className={`text-[var(--muted)] transition-transform ${expanded ? "rotate-180" : ""}`} size={18} aria-hidden="true" /></span>
-          </button>
-          {expanded && <div className="space-y-4 border-t border-[var(--border)] p-4">{quiz.questions.map(question => <article className="space-y-2" key={question.question_id}>
-            <div className="text-sm font-semibold">{question.prompt}</div><div className="grid gap-2 text-sm md:grid-cols-2"><div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-3"><div className="muted text-xs font-semibold uppercase">Submitted answer</div><div className="mt-1">{question.submitted_answer || "No answer submitted"}</div></div><div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-3"><div className="muted text-xs font-semibold uppercase">Correct answer</div><div className="mt-1">{question.correct_answer || "No answer recorded"}</div></div></div>
-          </article>)}</div>}
-        </div>;
-      })}</div> : <div className="muted py-4 text-center text-sm">No weak topics identified for this course.</div>}
     </section>
   </div>;
 }
