@@ -34,7 +34,7 @@ function StudentAdvisor() {
     <PageHeader title="AI Learning Path Advisor" description="Discover your strongest skill or develop a field you choose." />
     <div className="grid gap-4 md:grid-cols-2">
       <button className={`advisor-option-card panel p-6 text-left transition-all duration-200 hover:-translate-y-1 hover:scale-[1.01] hover:border-[var(--primary)] hover:bg-[color-mix(in_srgb,var(--primary)_6%,var(--panel))] hover:shadow-xl ${mode === "SKILL_DISCOVERY" ? "ring-2 ring-[var(--primary)]" : ""}`} onClick={() => { setMode("SKILL_DISCOVERY"); setField(null); }}>
-        <Compass className="text-[var(--primary)]" /><h2 className="mt-3 text-xl font-bold">Skill Discovery</h2><p className="muted mt-2">Take the existing Initial Assessment, then receive strongest-skill analysis and the best course recommendation.</p>
+        <Compass className="text-[var(--primary)]" /><h2 className="mt-3 text-xl font-bold">Skill Discovery</h2><p className="muted mt-2">Take the existing Skill discovery, then receive strongest-skill analysis and the best course recommendation.</p>
       </button>
       <button className={`advisor-option-card panel p-6 text-left transition-all duration-200 hover:-translate-y-1 hover:scale-[1.01] hover:border-[var(--primary)] hover:bg-[color-mix(in_srgb,var(--primary)_6%,var(--panel))] hover:shadow-xl ${mode === "SKILL_DEVELOPMENT" ? "ring-2 ring-[var(--primary)]" : ""}`} onClick={() => setMode("SKILL_DEVELOPMENT")}>
         <Sparkles className="text-[var(--primary)]" /><h2 className="mt-3 text-xl font-bold">Skill Development</h2><p className="muted mt-2">Choose a field, identify your level and gaps, and receive a matching course recommendation.</p>

@@ -31,7 +31,7 @@ def run():
         obj, _ = Course.objects.get_or_create(title=c["title"], category=cat, defaults={"description": c["desc"], "status": Course.Status.PUBLISHED})
         course_objs.append(obj)
 
-    # Create Initial Assessment Quiz
+    # Create Skill discovery Quiz
     quiz, _ = Quiz.objects.get_or_create(
         title="Placement Test", 
         is_initial_assessment=True, 

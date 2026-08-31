@@ -146,7 +146,7 @@ export function QuizDetailPage() {
             >
               Scored {visibleResult.percentage}% - {visibleResult.passed ? "Passed" : "Failed"}. {resultPublishedText}
               {quiz.is_initial_assessment && visibleResult.passed && (
-                <div className="mt-2 text-sm font-semibold">Initial assessment completed.</div>
+                <div className="mt-2 text-sm font-semibold">Skill discovery completed.</div>
               )}
             </div>
           )}

@@ -12,7 +12,7 @@ type Progress = {
   student: User; courses: CourseProgress[]; quiz_average: number;
   weak_topics: { attempt_id: number; quiz_id: number; quiz_title: string; course_title: string; incorrect_count: number; questions: { question_id: number; prompt: string; topic: string; submitted_answer: string; correct_answer: string }[] }[];
 };
-type StudentProgressSummary = { student: User; enrolled_courses: number; completed_materials: number; total_materials: number; quizzes_passed: number; quiz_total: number; overall_completion: number; status: "ON_TRACK" | "NEEDS_ATTENTION" };
+type StudentProgressSummary = { student: User; enrolled_courses: number; completed_materials: number; total_materials: number; quizzes_passed: number; quiz_total: number; certificates_eligible: number; certificates_issued: number; overall_completion: number; status: "ON_TRACK" | "NEEDS_ATTENTION" };
 
 function initials(user: User) {
   const value = `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.name || user.email;
@@ -21,10 +21,12 @@ function initials(user: User) {
 
 function ProgressReport({ report }: { report: Progress }) {
   const [expandedWeakQuiz, setExpandedWeakQuiz] = useState<number | null>(null);
+  const eligibleCertificates = report.courses.filter(course => course.certificate_eligible || course.certificate_number).length;
+  const issuedCertificates = report.courses.filter(course => course.certificate_number).length;
   useEffect(() => setExpandedWeakQuiz(null), [report.student.id]);
 
   return <div className="space-y-6">
-    <div className="grid-cards"><Stat label="Quiz Average" value={`${Number(report.quiz_average).toFixed(1)}%`} /><Stat label="Identified Weak Topics" value={report.weak_topics.length} /></div>
+    <div className="grid-cards"><Stat label="Quiz Average" value={`${Number(report.quiz_average).toFixed(1)}%`} /><Stat label="Identified Weak Topics" value={report.weak_topics.length} /><Stat label="Certificate Eligibility" value={`${eligibleCertificates} / ${report.courses.length} eligible${issuedCertificates ? ` · ${issuedCertificates} issued` : ""}`} /></div>
     <div className="grid items-start gap-6 lg:grid-cols-2">
       <section className="panel p-6">
         <h3 className="mb-4 text-xl font-bold">Course Completion</h3>
@@ -131,12 +133,13 @@ export function ProgressPage() {
   return <div className="space-y-6">
     <PageHeader title="Student Progress" description="One row per student, summarizing all course activity." />
     {summaries.loading ? <Loading variant="table" /> : summaries.error ? <ErrorMessage message={summaries.error} /> : !summaries.data?.length ? <Empty message="No student progress is available yet." /> : <div className="panel table-wrap">
-      <table className="w-full text-left text-sm"><thead><tr><th>Student</th><th>Enrolled courses</th><th>Materials</th><th>Quizzes passed</th><th>Overall progress</th><th>Status</th><th><span className="sr-only">Action</span></th></tr></thead>
+      <table className="w-full text-left text-sm"><thead><tr><th>Student</th><th>Enrolled courses</th><th>Materials</th><th>Quizzes passed</th><th>Overall progress</th><th>Status</th><th>Certificate eligibility</th><th><span className="sr-only">Action</span></th></tr></thead>
       <tbody>{summaries.data.map(summary => <tr key={summary.student.id} tabIndex={0} aria-label={`View progress details for ${summary.student.name}`} className="cursor-pointer transition-colors hover:bg-[var(--background)] focus-visible:outline-2 focus-visible:outline-[var(--primary)] focus-visible:outline-offset-[-2px]" onClick={() => setSelectedStudent(summary)} onKeyDown={event => handleRowKey(event, summary)}>
         <td><div className="flex min-w-48 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[color-mix(in_srgb,var(--primary)_14%,transparent)] text-xs font-bold text-[var(--primary)]">{initials(summary.student)}</span><span><strong className="block">{summary.student.name}</strong><span className="muted block text-xs">{summary.student.email}</span></span></div></td>
         <td className="font-semibold">{summary.enrolled_courses}</td><td className="font-semibold">{summary.completed_materials} / {summary.total_materials}</td><td className="font-semibold">{summary.quizzes_passed} / {summary.quiz_total}</td>
         <td><div className="flex min-w-36 items-center gap-3"><progress className="h-2 w-20 overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--background)] [&::-webkit-progress-value]:bg-[var(--primary)] [&::-moz-progress-bar]:bg-[var(--primary)]" value={summary.overall_completion} max="100" aria-label={`${summary.student.name} overall progress`} /><strong>{summary.overall_completion}%</strong></div></td>
         <td><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${summary.status === "ON_TRACK" ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--warning-soft)] text-[var(--warning)]"}`}>{summary.status === "ON_TRACK" ? "On track" : "Needs attention"}</span></td>
+        <td><span className="badge whitespace-nowrap">{summary.certificates_eligible} / {summary.enrolled_courses} eligible{summary.certificates_issued ? ` · ${summary.certificates_issued} issued` : ""}</span></td>
         <td><button type="button" className="whitespace-nowrap font-semibold text-[var(--primary)] hover:underline" onClick={event => { event.stopPropagation(); setSelectedStudent(summary); }}>View details</button></td>
       </tr>)}</tbody></table>
     </div>}

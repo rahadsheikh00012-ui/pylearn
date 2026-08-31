@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { api, jsonBody, unwrap } from "@/lib/api";
 import type { Category, Course } from "@/lib/types";
@@ -32,6 +33,7 @@ const bdtFormatter = new Intl.NumberFormat("en-BD", {
 export function CoursesPage() {
   const { confirm: confirmDialog, notify, prompt: promptDialog } = useFeedbackDialog();
   const { user } = useAuth();
+  const router = useRouter();
   const { data, loading, error, reload } = useApiData<Course[] | { results: Course[] }>("/courses/");
   const categories = useApiData<Category[] | { results: Category[] }>("/categories/");
 
@@ -164,6 +166,58 @@ export function CoursesPage() {
         <ErrorMessage message={error} />
       ) : courses.length === 0 ? (
         <Empty message="No courses available." />
+      ) : user?.role === "INSTRUCTOR" ? (
+        <div className="panel table-wrap">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr>
+                <th>Course</th>
+                <th>Category / Level</th>
+                <th>Type / Price</th>
+                <th>Status</th>
+                <th>Materials</th>
+                <th>Students</th>
+                <th><span className="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {courses.map(course => (
+                <tr
+                  key={course.id}
+                  tabIndex={0}
+                  className="cursor-pointer transition-colors hover:bg-[var(--background)] focus-visible:outline-2 focus-visible:outline-[var(--primary)] focus-visible:outline-offset-[-2px]"
+                  aria-label={`Open ${course.title}`}
+                  onClick={() => router.push(`/courses/${course.id}`)}
+                  onKeyDown={event => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      router.push(`/courses/${course.id}`);
+                    }
+                  }}
+                >
+                  <td>
+                    <div className="flex min-w-56 items-center gap-3">
+                      {course.thumbnail ? <img src={course.thumbnail} alt="" className="h-12 w-16 shrink-0 rounded-lg object-cover" /> : <div className="grid h-12 w-16 shrink-0 place-items-center rounded-lg bg-[var(--background)] text-xs text-[var(--muted)]">No image</div>}
+                      <div className="min-w-0"><strong className="block truncate text-[var(--foreground)]">{course.title}</strong><span className="muted mt-1 block text-xs">{course.course_code}</span></div>
+                    </div>
+                  </td>
+                  <td><strong className="block font-medium">{course.category_detail?.name || "Uncategorized"}</strong><span className="muted mt-1 block text-xs">{course.level.charAt(0) + course.level.slice(1).toLowerCase()}</span></td>
+                  <td><span className={`badge ${course.course_type === "FREE" ? "text-[var(--success)]" : "text-[var(--primary)]"}`}>{course.course_type === "FREE" ? "Free" : bdtFormatter.format(Number(course.price))}</span></td>
+                  <td><span className="badge">{course.status}</span></td>
+                  <td className="font-semibold">{course.materials?.length || 0}</td>
+                  <td className="font-semibold">{course.enrollment_count}</td>
+                  <td>
+                    <div className="flex min-w-max flex-wrap items-center gap-2">
+                      <Link className="btn btn-secondary" href={`/courses/${course.id}`} onClick={event => event.stopPropagation()}>View</Link>
+                      <button className="btn btn-secondary" onClick={event => { event.stopPropagation(); openEditCourseModal(course); }}>Edit</button>
+                      <button className="btn btn-danger" onClick={event => { event.stopPropagation(); void removeCourse(course.id); }}>Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="grid-cards">
           {courses.map(c => (

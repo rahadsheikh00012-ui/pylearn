@@ -166,7 +166,7 @@ def initial_assessment_recommendations(request, attempt):
             continue
         recommendations.append({
             "course_id": course_id,
-            "reason": str(rec.get("reason") or "Best match for your initial assessment results.")[:500],
+            "reason": str(rec.get("reason") or "Best match for your Skill discovery results.")[:500],
         })
         break
 
@@ -1041,6 +1041,8 @@ def student_progress_summaries(user):
         total_materials = sum(course["total_materials"] for course in courses)
         quizzes_passed = sum(course["quizzes_passed"] for course in courses)
         quiz_total = sum(course["quiz_total"] for course in courses)
+        certificates_eligible = sum(1 for course in courses if course["certificate_eligible"] or course["certificate_number"])
+        certificates_issued = sum(1 for course in courses if course["certificate_number"])
         overall_completion = round(completed_materials / total_materials * 100, 2) if total_materials else 0
         summaries.append({
             "student": report["student"],
@@ -1049,6 +1051,8 @@ def student_progress_summaries(user):
             "total_materials": total_materials,
             "quizzes_passed": quizzes_passed,
             "quiz_total": quiz_total,
+            "certificates_eligible": certificates_eligible,
+            "certificates_issued": certificates_issued,
             "overall_completion": overall_completion,
             "status": "ON_TRACK" if overall_completion >= 50 else "NEEDS_ATTENTION",
         })

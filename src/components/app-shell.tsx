@@ -16,7 +16,7 @@ const nav = [
   ["/progress", "Student Progress", ChartNoAxesCombined, "all"],
   ["/learning-path", "AI Learning Path", Brain, "student-admin"],
   ["/payments", "Payments", Banknote, "student-admin"],
-  ["/certificates", "Certificates", BadgeCheck, "student-admin"],
+  ["/certificates", "Certificates", BadgeCheck, "student"],
   ["/instructor-applications", "Instructor Applications", Users, "admin"],
   ["/users", "User Management", Users, "admin"],
   ["/ai-settings", "AI Settings", Brain, "admin"],
@@ -34,7 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => { if (!loading && !user) router.replace(`/login?next=${encodeURIComponent(pathname)}`); }, [loading, user, router, pathname]);
   useEffect(() => { if (!loading && user?.must_change_password && pathname !== "/change-password") router.replace("/change-password"); }, [loading, user, router, pathname]);
   if (loading || !user) return <main className="min-h-screen grid place-items-center">Loading PyLearn…</main>;
-  const visible = nav.filter(([, , , scope]) => scope === "all" || (scope === "admin" && user.role === "ADMIN") || (scope === "student-admin" && user.role !== "INSTRUCTOR"));
+  const visible = nav.filter(([, , , scope]) => scope === "all" || (scope === "admin" && user.role === "ADMIN") || (scope === "student" && user.role === "STUDENT") || (scope === "student-admin" && user.role !== "INSTRUCTOR"));
   const currentPath = normalizePath(pathname);
   return <div className="min-h-screen lg:flex">
     <aside className="app-sidebar lg:w-64 lg:min-h-screen p-4">

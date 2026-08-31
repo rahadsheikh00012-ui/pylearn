@@ -116,7 +116,7 @@ def generate_assessment_recommendations(student, performance, available_courses)
         raise ValueError("An Admin must configure an active AI provider.")
     api_key = decrypt_key(config.encrypted_api_key)
     prompt = (
-        "Analyze the following student's initial assessment quiz performance, including every question, selected answer, "
+        "Analyze the following student's Skill discoveryquiz performance, including every question, selected answer, "
         "correct answer, correctness, and topic. Determine the single knowledge or skill area where the student performed "
         "best, then match that strongest area against the provided list of available courses.\n"
         "Return ONLY a valid JSON object with a single key 'recommendations'. The value should be a JSON array of objects. "

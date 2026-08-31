@@ -214,7 +214,7 @@ export function QuizzesPage() {
         action={
           user?.role !== "STUDENT" && (
             <button className="btn btn-primary" onClick={openCreate}>
-              {activeTab === "initial" ? "New Initial Assessment" : activeTab === "development" ? "New Skill Development Quiz" : "New Quiz"}
+              {activeTab === "initial" ? "New Skill discovery" : activeTab === "development" ? "New Skill Development Quiz" : "New Quiz"}
             </button>
           )
         }
@@ -231,7 +231,7 @@ export function QuizzesPage() {
           className={`pb-2 px-1 font-semibold ${activeTab === "initial" ? "border-b-2 border-[var(--primary)] text-[var(--foreground)]" : "text-[var(--muted)]"}`}
           onClick={() => setActiveTab("initial")}
         >
-          Initial Assessments
+          Skill discoveries
         </button>}
         {user?.role !== "INSTRUCTOR" && <button className={`pb-2 px-1 font-semibold ${activeTab === "development" ? "border-b-2 border-[var(--primary)] text-[var(--foreground)]" : "text-[var(--muted)]"}`} onClick={() => setActiveTab("development")}>Skill Development</button>}
       </div>
@@ -248,7 +248,7 @@ export function QuizzesPage() {
             <article className="panel p-5 flex flex-col" key={q.id}>
               <div className="flex items-start mb-2">
                 <span className="badge">
-                  {q.is_initial_assessment ? "Initial Assessment / Skill Discovery" : q.quiz_type === "SKILL_DEVELOPMENT" ? "Skill Development" : q.course_title}
+                  {q.is_initial_assessment ? "Skill discovery" : q.quiz_type === "SKILL_DEVELOPMENT" ? "Skill Development" : q.course_title}
                 </span>
               </div>
               
@@ -287,7 +287,7 @@ export function QuizzesPage() {
       <Modal
         key={editingQuiz ? `edit-${editingQuiz.id}` : "create"}
         open={open}
-        title={editingQuiz ? (editingQuiz.is_initial_assessment ? "Edit Initial Assessment" : "Edit Quiz") : (activeTab === "initial" ? "Create Initial Assessment" : "Create Quiz")}
+        title={editingQuiz ? (editingQuiz.is_initial_assessment ? "Edit Skill discovery" : "Edit Quiz") : (activeTab === "initial" ? "Create Skill discovery" : "Create Quiz")}
         onCloseAction={closeModal}
         size="wide"
       >

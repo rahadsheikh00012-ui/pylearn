@@ -73,3 +73,6 @@ prompt
 
 server.log
 backend/portal/tests.py
+start.py
+public/admin-learning-path-mockup.html
+public/mockup.html

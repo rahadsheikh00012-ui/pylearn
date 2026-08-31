@@ -95,6 +95,7 @@ class PlatformDomainTests(APITestCase):
         row = next(item for item in response.data if item["student"]["id"] == self.student.pk)
         self.assertEqual((row["enrolled_courses"], row["completed_materials"], row["total_materials"]), (1, 1, 2))
         self.assertEqual((row["quizzes_passed"], row["quiz_total"], row["overall_completion"], row["status"]), (1, 1, 50, "ON_TRACK"))
+        self.assertEqual((row["certificates_eligible"], row["certificates_issued"]), (0, 0))
 
     def test_instructor_progress_is_scoped_to_owned_courses(self):
         other_instructor = User.objects.create_user(email="other-teacher@example.com", password="OtherPass123!", role=User.Role.INSTRUCTOR)
