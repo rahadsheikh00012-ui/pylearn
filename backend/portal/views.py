@@ -60,7 +60,11 @@ def is_instructor(user):
 
 
 def can_manage_course(user, course):
-    return is_admin(user) or (is_instructor(user) and course.instructor_id == user.pk)
+    if is_instructor(user):
+        return course.instructor_id == user.pk
+    if is_admin(user):
+        return course.instructor_id is None
+    return False
 
 
 def issue_certificate_if_eligible(student, course):
@@ -661,13 +665,13 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         if not can_manage_course(self.request.user, serializer.instance):
-            raise ValidationError("You cannot manage this course.")
+            raise PermissionDenied("Instructor courses are read-only for administrators.")
         course = serializer.save(instructor=self.request.user) if is_instructor(self.request.user) else serializer.save()
         log_activity(self.request.user, "UPDATE", "course", course.pk, course.title)
 
     def perform_destroy(self, instance):
         if not can_manage_course(self.request.user, instance):
-            raise PermissionDenied("You cannot delete this course.")
+            raise PermissionDenied("Instructor courses are read-only for administrators.")
         instance.delete()
 
 
@@ -690,18 +694,18 @@ class MaterialViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         if not can_manage_course(self.request.user, serializer.validated_data["course"]):
-            raise ValidationError("You cannot add material to this course.")
+            raise PermissionDenied("Instructor courses are read-only for administrators.")
         serializer.save()
 
     def perform_update(self, serializer):
         course = serializer.validated_data.get("course", serializer.instance.course)
         if not can_manage_course(self.request.user, course):
-            raise ValidationError("You cannot edit this material.")
+            raise PermissionDenied("Instructor courses are read-only for administrators.")
         serializer.save()
 
     def perform_destroy(self, instance):
         if not can_manage_course(self.request.user, instance.course):
-            raise ValidationError("You cannot delete this material.")
+            raise PermissionDenied("Instructor courses are read-only for administrators.")
         instance.delete()
 
     @action(detail=True, methods=["get"])
@@ -774,6 +778,8 @@ class QuizViewSet(viewsets.ModelViewSet):
         serializer = QuizSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         course = serializer.validated_data.get("course")
+        if course and not can_manage_course(request.user, course):
+            raise PermissionDenied("Instructor courses are read-only for administrators.")
         if is_instructor(request.user) and (not course or course.instructor_id != request.user.pk or serializer.validated_data.get("quiz_type") != Quiz.QuizType.COURSE):
             raise ValidationError("Instructors can create course quizzes only for their own courses.")
         if not (is_admin(request.user) or is_instructor(request.user)):
@@ -784,7 +790,9 @@ class QuizViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         quiz = self.get_object()
-        if not (is_admin(request.user) or (is_instructor(request.user) and quiz.course and quiz.course.instructor_id == request.user.pk)):
+        if quiz.course and not can_manage_course(request.user, quiz.course):
+            raise PermissionDenied("Instructor courses are read-only for administrators.")
+        if not quiz.course and not is_admin(request.user):
             raise ValidationError("You cannot edit this quiz.")
         if quiz.results_published:
             raise ValidationError("Published quiz results lock this quiz from editing.")
@@ -794,7 +802,9 @@ class QuizViewSet(viewsets.ModelViewSet):
         return Response(QuizReadSerializer(quiz, context={"request": request}).data)
 
     def perform_destroy(self, instance):
-        if not (is_admin(self.request.user) or (instance.course and can_manage_course(self.request.user, instance.course))):
+        if instance.course and not can_manage_course(self.request.user, instance.course):
+            raise PermissionDenied("Instructor courses are read-only for administrators.")
+        if not instance.course and not is_admin(self.request.user):
             raise PermissionDenied("You cannot delete this quiz.")
         instance.delete()
 
@@ -903,8 +913,8 @@ class QuizViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def publish_results(self, request, pk=None):
         quiz = self.get_object()
-        if not (is_admin(request.user) or (quiz.course and can_manage_course(request.user, quiz.course))):
-            return Response({"detail": "You cannot publish these results."}, status=status.HTTP_403_FORBIDDEN)
+        if (quiz.course and not can_manage_course(request.user, quiz.course)) or (not quiz.course and not is_admin(request.user)):
+            return Response({"detail": "Instructor quiz results are managed by the instructor."}, status=status.HTTP_403_FORBIDDEN)
         if quiz.is_initial_assessment or quiz.quiz_type != Quiz.QuizType.COURSE:
             return Response({"detail": "Advisor results are reviewed and published per attempt."}, status=status.HTTP_400_BAD_REQUEST)
         quiz.results_published = True

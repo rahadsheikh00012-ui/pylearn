@@ -60,7 +60,9 @@ Desktop.ini
 
 # Office temporary files
 ~$*
+DEPLOYMENT.md
 
+.agents
 *.log
 npm-debug.log*
 yarn-debug.log*

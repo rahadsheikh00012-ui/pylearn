@@ -36,3 +36,93 @@ export type StudentDashboard = {
     completed_at: string;
   }[];
 };
+
+export type CourseManagementOverview = {
+  total_courses: number;
+  active_instructors: number;
+  enrolled_students: number;
+  published_rate: number;
+  courses_this_month: number;
+  instructor_departments: number;
+};
+
+export type InstructorListItem = {
+  id: number;
+  name: string;
+  email: string;
+  department: string;
+  avatar: string | null;
+  course_count: number;
+  published_count: number;
+  student_count: number;
+  date_joined: string;
+};
+
+export type InstructorCourseItem = {
+  id: number;
+  course_code: string;
+  title: string;
+  description: string;
+  category: string;
+  level: string;
+  status: string;
+  course_type: "FREE" | "PAID";
+  price: string;
+  duration_hours: number;
+  thumbnail: string | null;
+  material_count: number;
+  enrollment_count: number;
+  created_at: string;
+};
+
+export type InstructorCoursesResponse = {
+  instructor: {
+    id: number;
+    name: string;
+    email: string;
+    department: string;
+    avatar: string | null;
+  };
+  courses: InstructorCourseItem[];
+};
+
+export type InstructorCourseMaterial = {
+  id: number;
+  title: string;
+  description: string;
+  material_type: "PDF" | "VIDEO" | "NOTE";
+  order: number;
+  has_file: boolean;
+  created_at: string;
+};
+
+export type InstructorCourseQuiz = {
+  id: number;
+  title: string;
+  description: string;
+  passing_score: number;
+  is_published: boolean;
+  results_published: boolean;
+  question_count: number;
+  created_at: string;
+};
+
+export type QuizAttemptItem = {
+  id: number;
+  student_name: string;
+  student_email: string;
+  score: string;
+  max_score: string;
+  percentage: string;
+  passed: boolean;
+  completed_at: string | null;
+};
+
+export type InstructorQuizResultsResponse = {
+  quiz: {
+    id: number;
+    title: string;
+    passing_score: number;
+  };
+  attempts: QuizAttemptItem[];
+};

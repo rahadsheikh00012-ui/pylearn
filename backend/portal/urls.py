@@ -1,4 +1,13 @@
 from django.urls import include, path
+from django.urls.converters import REGISTERED_CONVERTERS
+import rest_framework.urlpatterns as drf_patterns
+
+_orig_drf_register = drf_patterns.register_converter
+def _safe_drf_register(converter, type_name):
+    if type_name not in REGISTERED_CONVERTERS:
+        _orig_drf_register(converter, type_name)
+drf_patterns.register_converter = _safe_drf_register
+
 from rest_framework.routers import DefaultRouter
 from .views import (
     AIConfigView, AdminNotificationView, CategoryViewSet,
@@ -24,6 +33,7 @@ router.register("certificates", CertificateViewSet, basename="certificate")
 
 urlpatterns = [
     path("advisor/", include("portal.advisor.urls")),
+    path("course-management/", include("portal.course_management.urls")),
     path("auth/csrf/", csrf),
     path("auth/register/", register),
     path("auth/login/", login_view),
