@@ -23,14 +23,95 @@ class PlatformDomainTests(APITestCase):
         self.category = CourseCategory.objects.create(name="Security", slug="security")
         self.bkash = PaymentMethodConfig.objects.create(method="BKASH", display_name="bKash Merchant", account_details="01700000000", account_holder="PyLearn")
 
-    def test_admin_approval_creates_instructor_with_forced_password_change(self):
-        application = InstructorApplication.objects.create(full_name="New Teacher", email="new@example.com", phone="01700000000", bachelor_degree="BSc", teaching_background="Lecturer")
+    def test_admin_approval_uses_applicant_credentials_and_grants_access(self):
+        response = self.client.post("/api/v1/instructor-applications/", {"full_name":"New Teacher", "email":"new@example.com", "password":"ApplicantPass123!", "phone":"01700000000", "bachelor_degree":"BSc", "teaching_background":"Lecturer"}, format="json")
+        self.assertEqual(response.status_code, 201)
+        application = InstructorApplication.objects.get(reference=response.data["reference"])
+        pending_login = self.client.post("/api/v1/auth/login/", {"email":"new@example.com", "password":"ApplicantPass123!"}, format="json")
+        self.assertEqual(pending_login.status_code, 401)
         self.client.force_authenticate(self.admin)
-        response = self.client.post(f"/api/v1/instructor-applications/{application.reference}/approve/", {"password":"StrongTemp123!"}, format="json")
+        response = self.client.post(f"/api/v1/instructor-applications/{application.reference}/approve/", {}, format="json")
         self.assertEqual(response.status_code, 200)
         account = User.objects.get(email="new@example.com")
         self.assertEqual(account.role, User.Role.INSTRUCTOR)
-        self.assertTrue(account.must_change_password)
+        self.assertFalse(account.must_change_password)
+        self.assertTrue(account.check_password("ApplicantPass123!"))
+        self.client.force_authenticate(user=None)
+        approved_login = self.client.post("/api/v1/auth/login/", {"email":"new@example.com", "password":"ApplicantPass123!"}, format="json")
+        self.assertEqual(approved_login.status_code, 200)
+        self.assertEqual(approved_login.data["user"]["role"], User.Role.INSTRUCTOR)
+
+    def test_rejected_instructor_application_credentials_cannot_log_in(self):
+        submitted = self.client.post("/api/v1/instructor-applications/", {
+            "full_name":"Rejected Teacher", "email":"rejected@example.com", "password":"ApplicantPass123!",
+            "phone":"01700000000", "bachelor_degree":"BSc", "teaching_background":"Lecturer",
+        }, format="json")
+        self.client.force_authenticate(self.admin)
+        rejected = self.client.post(
+            f"/api/v1/instructor-applications/{submitted.data['reference']}/reject/",
+            {"admin_note":"Not approved"}, format="json",
+        )
+        self.assertEqual(rejected.status_code, 200)
+        self.client.force_authenticate(user=None)
+
+        login_response = self.client.post("/api/v1/auth/login/", {
+            "email":"rejected@example.com", "password":"ApplicantPass123!",
+        }, format="json")
+
+        self.assertEqual(login_response.status_code, 401)
+        self.assertFalse(User.objects.filter(email="rejected@example.com").exists())
+
+    def test_instructor_application_rejects_password_shorter_than_eight_characters(self):
+        response = self.client.post("/api/v1/instructor-applications/", {
+            "full_name": "New Teacher", "email": "short@example.com", "password": "short",
+            "phone": "01700000000", "bachelor_degree": "BSc", "teaching_background": "Lecturer",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("at least 8 characters", str(response.data["password"][0]))
+        self.assertFalse(InstructorApplication.objects.filter(email="short@example.com").exists())
+
+    def test_instructor_application_accepts_eight_character_password(self):
+        response = self.client.post("/api/v1/instructor-applications/", {
+            "full_name": "New Teacher", "email": "eight@example.com", "password": "Pass123!",
+            "phone": "01700000000", "bachelor_degree": "BSc", "teaching_background": "Lecturer",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(InstructorApplication.objects.filter(email="eight@example.com").exists())
+
+    def test_admin_progress_summary_aggregates_one_row_per_student(self):
+        course = Course.objects.create(title="Progress", description="Course", category=self.category, instructor=self.instructor)
+        enrollment = Enrollment.objects.create(student=self.student, course=course)
+        completed = LearningMaterial.objects.create(course=course, title="Completed", material_type="NOTE")
+        LearningMaterial.objects.create(course=course, title="Pending", material_type="NOTE")
+        MaterialProgress.objects.create(enrollment=enrollment, material=completed)
+        quiz = Quiz.objects.create(course=course, title="Check", is_published=True, results_published=True)
+        QuizAttempt.objects.create(quiz=quiz, student=self.student, score=1, max_score=1, percentage=100, passed=True)
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get("/api/v1/progress/")
+
+        row = next(item for item in response.data if item["student"]["id"] == self.student.pk)
+        self.assertEqual((row["enrolled_courses"], row["completed_materials"], row["total_materials"]), (1, 1, 2))
+        self.assertEqual((row["quizzes_passed"], row["quiz_total"], row["overall_completion"], row["status"]), (1, 1, 50, "ON_TRACK"))
+
+    def test_instructor_progress_is_scoped_to_owned_courses(self):
+        other_instructor = User.objects.create_user(email="other-teacher@example.com", password="OtherPass123!", role=User.Role.INSTRUCTOR)
+        own_course = Course.objects.create(title="Owned", description="Course", category=self.category, instructor=self.instructor)
+        other_course = Course.objects.create(title="Other", description="Course", category=self.category, instructor=other_instructor)
+        Enrollment.objects.create(student=self.student, course=own_course)
+        Enrollment.objects.create(student=self.student, course=other_course)
+        LearningMaterial.objects.create(course=own_course, title="Owned material", material_type="NOTE")
+        LearningMaterial.objects.create(course=other_course, title="Other material", material_type="NOTE")
+        self.client.force_authenticate(self.instructor)
+
+        summary = self.client.get("/api/v1/progress/")
+        detail = self.client.get(f"/api/v1/progress/?student={self.student.pk}")
+
+        self.assertEqual(len(summary.data), 1)
+        self.assertEqual((summary.data[0]["enrolled_courses"], summary.data[0]["total_materials"]), (1, 1))
+        self.assertEqual([course["course_id"] for course in detail.data["courses"]], [own_course.pk])
 
     def test_paid_course_requires_approved_payment(self):
         course = Course.objects.create(title="Paid Security", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED, course_type=Course.CourseType.PAID, price="500.00")

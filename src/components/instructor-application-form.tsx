@@ -251,6 +251,24 @@ export function InstructorApplicationForm({
                   </div>
                 </div>
 
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-[var(--foreground)]">
+                    Password
+                  </label>
+                  <input
+                    className="field w-full"
+                    name="password"
+                    type="password"
+                    placeholder="Create your instructor login password"
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                  <p className="text-xs text-[var(--muted)]">
+                    Use at least 8 characters. Your email will be your username, and you can sign in after admin approval.
+                  </p>
+                </div>
+
                 {/* Academic Credentials */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">

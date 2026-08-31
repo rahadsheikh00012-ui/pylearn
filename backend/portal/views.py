@@ -399,11 +399,8 @@ class InstructorApplicationViewSet(viewsets.ModelViewSet):
         application = self.get_object()
         if application.status != InstructorApplication.Status.PENDING:
             return Response({"detail": "Only pending applications can be approved."}, status=status.HTTP_400_BAD_REQUEST)
-        password = str(request.data.get("password", ""))
-        try:
-            validate_password(password)
-        except DjangoValidationError as exc:
-            return Response({"detail": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        if not application.password_hash:
+            return Response({"detail": "This application has no saved applicant password and must be resubmitted."}, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
             names = application.full_name.split(maxsplit=1)
             account, _ = User.objects.get_or_create(email=application.email, defaults={"first_name": names[0], "last_name": names[1] if len(names) > 1 else ""})
@@ -412,8 +409,8 @@ class InstructorApplicationViewSet(viewsets.ModelViewSet):
             account.role = User.Role.INSTRUCTOR
             account.phone = application.phone
             account.is_active = True
-            account.must_change_password = True
-            account.set_password(password)
+            account.must_change_password = False
+            account.password = application.password_hash
             account.save()
             application.status = InstructorApplication.Status.APPROVED
             application.instructor_account = account
@@ -962,13 +959,18 @@ class SearchView(APIView):
         })
 
 
-def progress_payload(student):
-    enrollments = Enrollment.objects.filter(student=student).select_related("course").prefetch_related("course__materials", "material_progress")
+def progress_payload(student, instructor=None):
+    enrollments = Enrollment.objects.filter(student=student)
+    if instructor:
+        enrollments = enrollments.filter(course__instructor=instructor)
+    enrollments = enrollments.select_related("course").prefetch_related("course__materials", "material_progress")
     quiz_attempts = (
         QuizAttempt.objects.filter(student=student, quiz__results_published=True)
         .select_related("quiz", "quiz__course")
         .prefetch_related("answers__question")
     )
+    if instructor:
+        quiz_attempts = quiz_attempts.filter(quiz__course__instructor=instructor)
     courses = []
     for enrollment in enrollments:
         total = enrollment.course.materials.count()
@@ -1023,6 +1025,34 @@ def progress_payload(student):
         "quiz_average": round(quiz_attempts.aggregate(value=Avg("percentage"))["value"] or 0),
         "weak_topics": weak_topics,
     }
+
+
+def student_progress_summaries(user):
+    students = User.objects.filter(role=User.Role.STUDENT).order_by("first_name", "last_name", "email")
+    instructor = user if is_instructor(user) else None
+    if instructor:
+        students = students.filter(enrollments__course__instructor=instructor).distinct()
+
+    summaries = []
+    for student in students:
+        report = progress_payload(student, instructor=instructor)
+        courses = report["courses"]
+        completed_materials = sum(course["completed_materials"] for course in courses)
+        total_materials = sum(course["total_materials"] for course in courses)
+        quizzes_passed = sum(course["quizzes_passed"] for course in courses)
+        quiz_total = sum(course["quiz_total"] for course in courses)
+        overall_completion = round(completed_materials / total_materials * 100, 2) if total_materials else 0
+        summaries.append({
+            "student": report["student"],
+            "enrolled_courses": len(courses),
+            "completed_materials": completed_materials,
+            "total_materials": total_materials,
+            "quizzes_passed": quizzes_passed,
+            "quiz_total": quiz_total,
+            "overall_completion": overall_completion,
+            "status": "ON_TRACK" if overall_completion >= 50 else "NEEDS_ATTENTION",
+        })
+    return summaries
 
 
 def student_dashboard_payload(request):
@@ -1086,15 +1116,19 @@ def student_dashboard_payload(request):
 
 class ProgressView(APIView):
     def get(self, request):
-        if is_admin(request.user) and request.query_params.get("student"):
+        student_id = request.query_params.get("student")
+        if (is_admin(request.user) or is_instructor(request.user)) and not student_id:
+            return Response(student_progress_summaries(request.user))
+        if is_admin(request.user) and student_id:
             student = get_object_or_404(User, pk=request.query_params["student"], role=User.Role.STUDENT)
-        elif is_instructor(request.user) and request.query_params.get("student"):
-            student = get_object_or_404(User, pk=request.query_params["student"], role=User.Role.STUDENT, enrollments__course__instructor=request.user)
-        elif is_instructor(request.user):
-            return Response({"detail": "Select a student enrolled in one of your courses."}, status=status.HTTP_400_BAD_REQUEST)
+        elif is_instructor(request.user) and student_id:
+            student = get_object_or_404(
+                User.objects.filter(role=User.Role.STUDENT, enrollments__course__instructor=request.user).distinct(),
+                pk=student_id,
+            )
         else:
             student = request.user
-        return Response(progress_payload(student))
+        return Response(progress_payload(student, instructor=request.user if is_instructor(request.user) else None))
 
 
 class DashboardView(APIView):

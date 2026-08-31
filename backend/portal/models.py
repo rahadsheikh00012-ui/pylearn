@@ -196,6 +196,7 @@ class InstructorApplication(TimeStampedModel):
     years_experience = models.PositiveIntegerField(null=True, blank=True)
     expertise = models.TextField(blank=True)
     teaching_background = models.TextField()
+    password_hash = models.CharField(max_length=128, editable=False)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
     reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_instructor_applications")
     reviewed_at = models.DateTimeField(null=True, blank=True)

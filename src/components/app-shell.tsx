@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { BadgeCheck, Banknote, BookOpen, Brain, ChartNoAxesCombined, ClipboardCheck, GraduationCap, LayoutDashboard, LogOut, Search, UserRound, Users } from "lucide-react";
+import { BadgeCheck, Banknote, BookOpen, Brain, ChartNoAxesCombined, ClipboardCheck, LayoutDashboard, LogOut, Search, UserRound, Users } from "lucide-react";
 import { BrandLogo } from "./brand-logo";
 import { ThemeToggle } from "./theme-toggle";
 import { useAuth } from "./auth-provider";
@@ -11,10 +11,9 @@ import { useAuth } from "./auth-provider";
 const nav = [
   ["/dashboard", "Dashboard", LayoutDashboard, "all"],
   ["/courses", "Courses", BookOpen, "all"],
-  ["/enrollments", "Enrollments", GraduationCap, "all"],
   ["/quizzes", "Quizzes", ClipboardCheck, "all"],
   ["/search", "Search", Search, "all"],
-  ["/progress", "Progress", ChartNoAxesCombined, "all"],
+  ["/progress", "Student Progress", ChartNoAxesCombined, "all"],
   ["/learning-path", "AI Learning Path", Brain, "student-admin"],
   ["/payments", "Payments", Banknote, "student-admin"],
   ["/certificates", "Certificates", BadgeCheck, "student-admin"],

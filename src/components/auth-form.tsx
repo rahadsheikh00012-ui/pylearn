@@ -238,7 +238,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" | "forgot" }) {
                       name="password"
                       type={showPassword ? "text" : "password"}
                       placeholder="••••••••••••"
-                      minLength={10}
+                      minLength={8}
                       autoComplete={mode === "login" ? "current-password" : "new-password"}
                       required
                     />

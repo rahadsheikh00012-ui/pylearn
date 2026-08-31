@@ -2,6 +2,7 @@ from pathlib import Path
 from decimal import Decimal
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.hashers import make_password
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Q
 from django.utils.text import slugify
@@ -410,17 +411,25 @@ class QuizAttemptSerializer(serializers.ModelSerializer):
 
 
 class InstructorApplicationSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, validators=[validate_password])
+
     class Meta:
         model = InstructorApplication
-        fields = ["id", "reference", "full_name", "email", "phone", "bachelor_degree", "master_degree", "years_experience", "expertise", "teaching_background", "status", "admin_note", "created_at", "reviewed_at", "instructor_account"]
+        fields = ["id", "reference", "full_name", "email", "password", "phone", "bachelor_degree", "master_degree", "years_experience", "expertise", "teaching_background", "status", "admin_note", "created_at", "reviewed_at", "instructor_account"]
         read_only_fields = ["id", "reference", "status", "admin_note", "created_at", "reviewed_at", "instructor_account"]
 
     def validate_email(self, value):
         email = value.strip().lower()
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError("An account already exists for this email.")
         if InstructorApplication.objects.filter(email=email, status=InstructorApplication.Status.PENDING).exclude(pk=getattr(self.instance, "pk", None)).exists():
             raise serializers.ValidationError("A pending application already exists for this email.")
         return email
 
+    def create(self, validated_data):
+        password = validated_data.pop("password")
+        validated_data["password_hash"] = make_password(password)
+        return super().create(validated_data)
 
 class PaymentMethodConfigSerializer(serializers.ModelSerializer):
     class Meta:
