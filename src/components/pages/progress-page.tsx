@@ -58,9 +58,42 @@ function ProgressReport({ report }: { report: Progress }) {
   </div>;
 }
 
+function CourseProgressDetails({ course, report }: { course: CourseProgress; report: Progress }) {
+  const [expandedWeakQuiz, setExpandedWeakQuiz] = useState<number | null>(null);
+  const weakTopics = report.weak_topics.filter(topic => topic.course_title === course.title);
+  return <div className="space-y-6">
+    <div><span className="badge">{course.course_code}</span><h3 className="mt-2 text-xl font-bold">{course.title}</h3></div>
+    <div className="grid-cards">
+      <Stat label="Materials" value={`${course.completed_materials} / ${course.total_materials}`} />
+      <Stat label="Quizzes Passed" value={`${course.quizzes_passed} / ${course.quiz_total}`} />
+      <Stat label="Completion" value={`${course.completion}%`} />
+    </div>
+    <section className="panel p-6">
+      <div className="mb-2 flex items-center justify-between gap-3"><h3 className="font-bold">Overall Progress</h3><strong className="text-[var(--primary)]">{course.completion}%</strong></div>
+      <progress className="h-2.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--background)] [&::-webkit-progress-value]:bg-[var(--primary)] [&::-moz-progress-bar]:bg-[var(--primary)]" value={course.completion} max="100" aria-label={`${course.title} completion`} />
+      <span className="badge mt-3">{course.certificate_number ? "Certificate issued" : course.certificate_eligible ? "Certificate eligible" : "Not yet certificate eligible"}</span>
+    </section>
+    <section className="panel p-6">
+      <h3 className="mb-4 text-xl font-bold">Weak Topics</h3>
+      {weakTopics.length ? <div className="space-y-3">{weakTopics.map(quiz => {
+        const expanded = expandedWeakQuiz === quiz.attempt_id;
+        return <div className="rounded-lg border border-[var(--border)] bg-[var(--background)]" key={quiz.attempt_id}>
+          <button type="button" className="flex w-full items-center justify-between gap-3 p-4 text-left" aria-expanded={expanded} onClick={() => setExpandedWeakQuiz(expanded ? null : quiz.attempt_id)}>
+            <strong>{quiz.quiz_title}</strong><span className="flex items-center gap-2"><span className="badge">{quiz.incorrect_count} incorrect</span><ChevronDown className={`text-[var(--muted)] transition-transform ${expanded ? "rotate-180" : ""}`} size={18} aria-hidden="true" /></span>
+          </button>
+          {expanded && <div className="space-y-4 border-t border-[var(--border)] p-4">{quiz.questions.map(question => <article className="space-y-2" key={question.question_id}>
+            <div className="text-sm font-semibold">{question.prompt}</div><div className="grid gap-2 text-sm md:grid-cols-2"><div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-3"><div className="muted text-xs font-semibold uppercase">Submitted answer</div><div className="mt-1">{question.submitted_answer || "No answer submitted"}</div></div><div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-3"><div className="muted text-xs font-semibold uppercase">Correct answer</div><div className="mt-1">{question.correct_answer || "No answer recorded"}</div></div></div>
+          </article>)}</div>}
+        </div>;
+      })}</div> : <div className="muted py-4 text-center text-sm">No weak topics identified for this course.</div>}
+    </section>
+  </div>;
+}
+
 export function ProgressPage() {
   const { user, loading: authLoading } = useAuth();
   const [selectedStudent, setSelectedStudent] = useState<StudentProgressSummary | null>(null);
+  const [selectedCourse, setSelectedCourse] = useState<CourseProgress | null>(null);
   const isStudent = user?.role === "STUDENT";
   const summaries = useApiData<StudentProgressSummary[]>(user && !isStudent ? "/progress/" : null);
   const personalReport = useApiData<Progress>(user && isStudent ? "/progress/" : null);
@@ -75,7 +108,24 @@ export function ProgressPage() {
   if (isStudent) {
     if (personalReport.loading && !personalReport.data) return <Loading variant="dashboard" />;
     if (personalReport.error || !personalReport.data) return <ErrorMessage message={personalReport.error || "No report available"} />;
-    return <div className="space-y-6"><PageHeader title="Student Progress" description="Course completion and assessment performance metrics." /><ProgressReport report={personalReport.data} /></div>;
+    const report = personalReport.data;
+    return <div className="space-y-6">
+      <PageHeader title="Student Progress" description="Each row shows progress for one enrolled course." />
+      {!report.courses.length ? <Empty message="No enrolled course progress is available yet." /> : <div className="panel table-wrap">
+        <table className="w-full text-left text-sm"><thead><tr><th>Course</th><th>Materials</th><th>Quizzes passed</th><th>Overall progress</th><th>Status</th><th>Certificate</th><th><span className="sr-only">Action</span></th></tr></thead>
+        <tbody>{report.courses.map(course => <tr key={course.course_id} tabIndex={0} aria-label={`View progress details for ${course.title}`} className="cursor-pointer transition-colors hover:bg-[var(--background)] focus-visible:outline-2 focus-visible:outline-[var(--primary)] focus-visible:outline-offset-[-2px]" onClick={() => setSelectedCourse(course)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedCourse(course); } }}>
+          <td><span className="badge">{course.course_code}</span><strong className="mt-2 block min-w-48">{course.title}</strong></td>
+          <td className="font-semibold">{course.completed_materials} / {course.total_materials}</td><td className="font-semibold">{course.quizzes_passed} / {course.quiz_total}</td>
+          <td><div className="flex min-w-36 items-center gap-3"><progress className="h-2 w-20 overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-[var(--background)] [&::-webkit-progress-value]:bg-[var(--primary)] [&::-moz-progress-bar]:bg-[var(--primary)]" value={course.completion} max="100" aria-label={`${course.title} overall progress`} /><strong>{course.completion}%</strong></div></td>
+          <td><span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${course.completion >= 50 ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--warning-soft)] text-[var(--warning)]"}`}>{course.completion >= 50 ? "On track" : "Needs attention"}</span></td>
+          <td><span className="badge whitespace-nowrap">{course.certificate_number ? "Issued" : course.certificate_eligible ? "Eligible" : "Not eligible"}</span></td>
+          <td><button type="button" className="whitespace-nowrap font-semibold text-[var(--primary)] hover:underline" onClick={event => { event.stopPropagation(); setSelectedCourse(course); }}>View details</button></td>
+        </tr>)}</tbody></table>
+      </div>}
+      <Modal open={Boolean(selectedCourse)} title={selectedCourse ? `${selectedCourse.title} — Progress` : "Course Progress"} onCloseAction={() => setSelectedCourse(null)} size="wide">
+        {selectedCourse && <CourseProgressDetails course={selectedCourse} report={report} />}
+      </Modal>
+    </div>;
   }
 
   return <div className="space-y-6">
