@@ -12,7 +12,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Avg, Q
+from django.db.models import Avg, Count, Q
 from django.http import FileResponse
 from django.http import HttpResponse
 from django.middleware.csrf import get_token
@@ -925,47 +925,179 @@ class QuizViewSet(viewsets.ModelViewSet):
 
 
 class SearchView(APIView):
+    page_size = 20
+
+    def _page(self, request, queryset, serializer):
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+        except (TypeError, ValueError):
+            raise ValidationError({"page": "Page must be a positive integer."})
+        total = queryset.count()
+        start = (page - 1) * self.page_size
+        rows = list(queryset[start:start + self.page_size])
+        return {
+            "count": total,
+            "page": page,
+            "page_size": self.page_size,
+            "pages": max(1, (total + self.page_size - 1) // self.page_size),
+            "results": [serializer(row) for row in rows],
+        }
+
+    @staticmethod
+    def _name(user):
+        return user.get_full_name() or user.email
+
+    def _course(self, request, course):
+        owned = is_instructor(request.user) and course.instructor_id == request.user.pk
+        enrolled = hasattr(course, "search_enrolled") and bool(course.search_enrolled)
+        action = "Manage course" if owned or is_admin(request.user) else "Continue learning" if enrolled else "View course"
+        return {
+            "id": course.pk, "kind": "courses", "title": course.title,
+            "subtitle": course.course_code or "Course", "description": course.description,
+            "badges": [course.category.name, course.level, course.status, course.course_type],
+            "href": f"/courses/{course.pk}", "action": action,
+        }
+
+    def _material(self, request, material):
+        return {
+            "id": material.pk, "kind": "materials", "title": material.title,
+            "subtitle": material.course.title, "description": material.description or material.note_content[:180],
+            "badges": [material.material_type, material.course.course_code or "Course"],
+            "href": f"/courses/{material.course_id}", "action": "Open material",
+        }
+
+    def _quiz(self, request, quiz):
+        return {
+            "id": quiz.pk, "kind": "quizzes", "title": quiz.title,
+            "subtitle": quiz.course.title if quiz.course else quiz.get_quiz_type_display(),
+            "description": quiz.description, "badges": [quiz.get_quiz_type_display(), "Published" if quiz.is_published else "Draft"],
+            "href": f"/quizzes/{quiz.pk}", "action": "Manage quiz" if is_admin(request.user) or is_instructor(request.user) else "Take quiz",
+        }
+
     def get(self, request):
         query = request.query_params.get("q", "").strip()
-        category = request.query_params.get("category")
-        courses = Course.objects.filter(status=Course.Status.PUBLISHED).prefetch_related("materials", "enrollments")
-        materials = LearningMaterial.objects.filter(course__status=Course.Status.PUBLISHED)
-        if not is_admin(request.user):
-            materials = materials.filter(course__enrollments__student=request.user)
+        tab = request.query_params.get("tab", "all")
+        category = request.query_params.get("category", "")
+        status_filter = request.query_params.get("status", "")
+        material_type = request.query_params.get("material_type", "")
+        level = request.query_params.get("level", "")
+        course_type = request.query_params.get("course_type", "")
+        user_role = request.query_params.get("user_role", "")
+        payment_status = request.query_params.get("payment_status", "")
+        application_status = request.query_params.get("application_status", "")
+        role = request.user.role
+
+        course_q = Q(title__icontains=query) | Q(description__icontains=query) | Q(course_code__icontains=query) | Q(category__name__icontains=query)
+        material_q = Q(title__icontains=query) | Q(description__icontains=query) | Q(note_content__icontains=query) | Q(course__title__icontains=query) | Q(course__course_code__icontains=query)
+        quiz_q = Q(title__icontains=query) | Q(description__icontains=query) | Q(course__title__icontains=query) | Q(course__course_code__icontains=query)
+
+        courses = Course.objects.select_related("category", "instructor").annotate(
+            search_enrolled=Count("enrollments", filter=Q(enrollments__student=request.user))
+        )
+        materials = LearningMaterial.objects.select_related("course")
+        quizzes = Quiz.objects.select_related("course")
+
+        if role == User.Role.STUDENT:
+            courses = courses.filter(status=Course.Status.PUBLISHED)
+            materials = materials.filter(course__status=Course.Status.PUBLISHED, course__enrollments__student=request.user)
+            quizzes = quizzes.filter(is_published=True).filter(Q(course__isnull=True) | Q(course__enrollments__student=request.user))
+            allowed_tabs = ["all", "courses", "materials", "quizzes", "enrollments", "learning_paths"]
+        elif role == User.Role.INSTRUCTOR:
+            courses = courses.filter(Q(instructor=request.user) | Q(status=Course.Status.PUBLISHED))
+            materials = materials.filter(Q(course__instructor=request.user) | Q(course__status=Course.Status.PUBLISHED))
+            quizzes = quizzes.filter(Q(course__instructor=request.user) | Q(course__status=Course.Status.PUBLISHED, is_published=True))
+            allowed_tabs = ["all", "courses", "materials", "quizzes", "students"]
+        else:
+            allowed_tabs = ["all", "courses", "materials", "quizzes", "users", "enrollments", "payments", "certificates", "applications"]
+
+        if tab not in allowed_tabs:
+            raise ValidationError({"tab": "This result type is not available for your role."})
         if category:
             courses = courses.filter(category_id=category)
             materials = materials.filter(course__category_id=category)
+            quizzes = quizzes.filter(course__category_id=category)
+        if level:
+            courses = courses.filter(level=level)
+        if course_type:
+            courses = courses.filter(course_type=course_type)
+        if status_filter:
+            courses = courses.filter(status=status_filter)
+        if material_type:
+            materials = materials.filter(material_type=material_type)
         if query:
-            normalized_query = "".join(ch for ch in query.upper() if ch.isalnum())
+            courses = courses.filter(course_q)
+            materials = materials.filter(material_q)
+            quizzes = quizzes.filter(quiz_q)
 
-            def acronym(value):
-                return "".join(word[0] for word in value.split() if word).upper()
+        groups = {
+            "courses": (courses.distinct().order_by("-updated_at"), lambda row: self._course(request, row)),
+            "materials": (materials.distinct().order_by("-updated_at"), lambda row: self._material(request, row)),
+            "quizzes": (quizzes.distinct().order_by("-updated_at"), lambda row: self._quiz(request, row)),
+        }
 
-            def course_matches(course):
-                searchable = " ".join([
-                    course.title,
-                    course.description,
-                    course.category.name,
-                    course.course_code or "",
-                ]).lower()
-                normalized_code = "".join(ch for ch in (course.course_code or "").upper() if ch.isalnum())
-                return (
-                    query.lower() in searchable
-                    or normalized_query in normalized_code
-                    or normalized_code.startswith(normalized_query)
-                    or acronym(course.title).startswith(normalized_query)
-                )
-
-            matched_courses = [course for course in courses.select_related("category") if course_matches(course)]
-            matched_course_ids = [course.pk for course in matched_courses]
-            material_query = Q(title__icontains=query) | Q(note_content__icontains=query) | Q(course__title__icontains=query) | Q(course__course_code__icontains=query)
-            materials = materials.filter(material_query | Q(course_id__in=matched_course_ids))
-            courses = matched_courses
+        if role == User.Role.STUDENT:
+            enrollments = Enrollment.objects.filter(student=request.user).select_related("course")
+            attempts = QuizAttempt.objects.filter(student=request.user, analysis_status=QuizAttempt.AnalysisStatus.PUBLISHED).select_related("quiz", "advisor_analysis")
+            if query:
+                enrollments = enrollments.filter(Q(course__title__icontains=query) | Q(course__course_code__icontains=query))
+                attempts = attempts.filter(Q(quiz__title__icontains=query) | Q(advisor_analysis__summary__icontains=query))
+            groups["enrollments"] = (enrollments.order_by("-enrolled_at"), lambda row: {
+                "id": row.pk, "kind": "enrollments", "title": row.course.title, "subtitle": "My learning",
+                "description": "Continue your enrolled course.", "badges": [row.course.course_code or "Course"],
+                "href": f"/courses/{row.course_id}", "action": "Continue learning",
+            })
+            groups["learning_paths"] = (attempts.order_by("-completed_at"), lambda row: {
+                "id": row.pk, "kind": "learning_paths", "title": row.quiz.title, "subtitle": "Published learning path",
+                "description": getattr(getattr(row, "advisor_analysis", None), "summary", "") or "View your personalized learning recommendations.", "badges": [row.get_analysis_status_display()],
+                "href": "/learning-path", "action": "View learning path",
+            })
+        elif role == User.Role.INSTRUCTOR:
+            students = User.objects.filter(role=User.Role.STUDENT, enrollments__course__instructor=request.user).distinct()
+            if query:
+                students = students.filter(Q(email__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(student_id__icontains=query))
+            groups["students"] = (students.order_by("first_name", "last_name"), lambda row: {
+                "id": row.pk, "kind": "students", "title": self._name(row), "subtitle": row.student_id or row.email,
+                "description": row.email, "badges": ["Student"], "href": "/progress", "action": "View student progress",
+            })
         else:
-            courses = courses[:25]
+            users = User.objects.all()
+            enrollments = Enrollment.objects.select_related("student", "course")
+            payments = Payment.objects.select_related("student", "course")
+            certificates = Certificate.objects.select_related("student", "course")
+            applications = InstructorApplication.objects.all()
+            if user_role:
+                users = users.filter(role=user_role)
+            if payment_status:
+                payments = payments.filter(status=payment_status)
+            if application_status:
+                applications = applications.filter(status=application_status)
+            if query:
+                users = users.filter(Q(email__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(student_id__icontains=query))
+                enrollments = enrollments.filter(Q(student__email__icontains=query) | Q(course__title__icontains=query) | Q(course__course_code__icontains=query))
+                payments = payments.filter(Q(transaction_id__icontains=query) | Q(student__email__icontains=query) | Q(course__title__icontains=query))
+                certificates = certificates.filter(Q(verification_number__icontains=query) | Q(student_name__icontains=query) | Q(course_title__icontains=query))
+                applications = applications.filter(Q(reference__icontains=query) | Q(full_name__icontains=query) | Q(email__icontains=query))
+            groups.update({
+                "users": (users.order_by("-date_joined"), lambda row: {"id": row.pk, "kind": "users", "title": self._name(row), "subtitle": row.email, "description": row.department, "badges": [row.role, "Active" if row.is_active else "Inactive"], "href": "/users", "action": "Manage user"}),
+                "enrollments": (enrollments.order_by("-enrolled_at"), lambda row: {"id": row.pk, "kind": "enrollments", "title": self._name(row.student), "subtitle": row.course.title, "description": f"Enrolled {row.enrolled_at.date()}", "badges": [row.course.course_code or "Course"], "href": "/enrollments", "action": "View enrollment"}),
+                "payments": (payments.order_by("-created_at"), lambda row: {"id": row.pk, "kind": "payments", "title": row.transaction_id, "subtitle": self._name(row.student), "description": row.course.title, "badges": [row.status, f"{row.amount} BDT"], "href": "/payments", "action": "Review payment"}),
+                "certificates": (certificates.order_by("-issued_at"), lambda row: {"id": row.pk, "kind": "certificates", "title": row.verification_number, "subtitle": row.student_name, "description": row.course_title, "badges": ["Revoked" if row.revoked_at else "Valid"], "href": "/certificates", "action": "View certificate"}),
+                "applications": (applications.order_by("-created_at"), lambda row: {"id": row.pk, "kind": "applications", "title": row.reference, "subtitle": row.full_name, "description": row.email, "badges": [row.status], "href": "/instructor-applications", "action": "Review application"}),
+            })
+
+        requested = allowed_tabs[1:] if tab == "all" else [tab]
+        payload = {}
+        for name in requested:
+            queryset, serializer = groups[name]
+            page_data = self._page(request, queryset, serializer)
+            if tab == "all":
+                page_data["results"] = page_data["results"][:5]
+            payload[name] = page_data
         return Response({
-            "courses": CourseSerializer(courses[:25], many=True, context={"request": request}).data,
-            "materials": MaterialSerializer(materials[:25], many=True, context={"request": request}).data,
+            "query": query, "role": role, "tab": tab, "available_tabs": allowed_tabs,
+            "groups": payload,
+            "courses": payload.get("courses", {}).get("results", []),
+            "materials": payload.get("materials", {}).get("results", []),
         })
 
 

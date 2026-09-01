@@ -1,13 +1,14 @@
 import type { NextConfig } from "next";
 
 const backend = process.env.DJANGO_BACKEND_URL || "http://127.0.0.1:8000";
+const developmentScriptPolicy = process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : "";
 
 const nextConfig: NextConfig = {
   trailingSlash: true,
   async headers() {
     const csp = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' https://apis.google.com https://www.gstatic.com",
+      `script-src 'self' 'unsafe-inline'${developmentScriptPolicy} https://apis.google.com https://www.gstatic.com`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
