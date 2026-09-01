@@ -31,7 +31,7 @@ function blankQuestion(): QuestionDraft {
     question_type: "MULTIPLE_CHOICE",
     prompt: "",
     topic: "General",
-    options: ["Option 1", "Option 2"],
+    options: ["", ""],
     correct_answer: "",
     correct_answers: [],
     allow_multiple_correct_answers: false,
@@ -371,8 +371,7 @@ export function QuizzesPage() {
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="font-semibold text-sm">Options</span>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
-                          const nextOption = `Option ${question.options.length + 1}`;
-                          updateQuestion(index, { options: [...question.options, nextOption] });
+                          updateQuestion(index, { options: [...question.options, ""] });
                         }}>
                           <Plus size={14} aria-hidden="true" />
                           Add Option
@@ -387,8 +386,11 @@ export function QuizzesPage() {
                               value={option}
                               onChange={event => {
                                 const nextOptions = [...question.options];
-                                nextOptions[optionIndex] = event.target.value;
-                                updateQuestion(index, { options: nextOptions });
+                                const oldVal = nextOptions[optionIndex];
+                                const newVal = event.target.value;
+                                nextOptions[optionIndex] = newVal;
+                                const nextCorrectAnswers = question.correct_answers.map(ans => ans === oldVal ? newVal : ans);
+                                updateQuestion(index, { options: nextOptions, correct_answers: nextCorrectAnswers });
                               }}
                               placeholder={`Option ${optionIndex + 1}`}
                               required
@@ -398,8 +400,9 @@ export function QuizzesPage() {
                               <input
                                 type="checkbox"
                                 className="w-4 h-4 accent-[var(--primary)]"
-                                checked={question.correct_answers.includes(option)}
+                                checked={Boolean(option) && question.correct_answers.includes(option)}
                                 onChange={event => {
+                                  if (!option) return;
                                   const nextCorrectAnswers = new Set(question.correct_answers);
                                   if (event.target.checked) {
                                     nextCorrectAnswers.add(option);
