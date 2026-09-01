@@ -34,23 +34,46 @@ function QuestionHeading({ answer, index }: { answer: AdvisorAnswer; index: numb
   return <><h3 className="flex items-start gap-2 text-lg font-bold"><span className="text-[var(--primary)]">{index + 1}.</span>{answer.prompt}</h3><div className="mt-3 flex flex-wrap gap-2"><span className="badge">{answer.topic}</span>{answer.field_name && <span className="badge">{answer.field_name}</span>}{answer.skill_name && <span className="badge">{answer.skill_name}</span>}</div></>;
 }
 
+function toTextList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(item => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") {
+        if ("name" in item) return String((item as { name: unknown }).name).trim();
+        if ("skill" in item) return String((item as { skill: unknown }).skill).trim();
+        if ("description" in item) return String((item as { description: unknown }).description).trim();
+        return JSON.stringify(item);
+      }
+      return String(item ?? "").trim();
+    }).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.split("\n").map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 export function PublishedAdvisorResult({ attempt }: { attempt: AdvisorAttempt }) {
   const analysis = attempt.analysis;
   if (!analysis) return null;
   const discovery = attempt.quiz_type === "SKILL_DISCOVERY";
+  const strengths = toTextList(analysis.strengths);
+  const gaps = toTextList(analysis.gaps);
+  const strongestSkills = toTextList(analysis.strongest_skill_names);
+
   return <div className="space-y-6">
     <section className="panel border-[var(--primary)] p-6">
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div><span className="badge">Admin reviewed</span><h2 className="mt-3 text-2xl font-bold">{discovery ? "Your Skill Discovery result" : "Your Skill Development result"}</h2><p className="muted mt-2 max-w-2xl">{analysis.summary}</p></div>
         <div className="text-right"><div className="text-4xl font-bold text-[var(--primary)]">{attempt.percentage ?? "-"}%</div><div className="mt-1 font-semibold">{analysis.level ? analysis.level.toLowerCase().replace(/^./, value => value.toUpperCase()) : "Diagnostic result"}</div></div>
       </div>
-      {discovery && analysis.strongest_field_name && <p className="mt-5"><strong>Strongest field:</strong> {analysis.strongest_field_name}</p>}
-      {discovery && analysis.strongest_skill_names.length > 0 && <p className="mt-2"><strong>Strongest skills:</strong> {analysis.strongest_skill_names.join(", ")}</p>}
+      {!discovery && analysis.strongest_field_name && <p className="mt-5"><strong>Strongest field:</strong> {analysis.strongest_field_name}</p>}
+      {strongestSkills.length > 0 && <p className="mt-2"><strong>Strongest skills:</strong> {strongestSkills.join(", ")}</p>}
       <p className="muted mt-4 text-sm">Published {attempt.published_at ? new Date(attempt.published_at).toLocaleString() : "after administrator review"}</p>
     </section>
     <section className="grid gap-4 md:grid-cols-2">
-      <div className="panel p-5"><h2 className="font-bold">Strengths</h2>{analysis.strengths.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{analysis.strengths.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">No specific strengths were listed.</p>}</div>
-      <div className="panel p-5"><h2 className="font-bold">Skill gaps</h2>{analysis.gaps.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{analysis.gaps.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">No priority gaps were identified.</p>}</div>
+      <div className="panel p-5"><h2 className="font-bold">Strengths</h2>{strengths.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{strengths.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">No specific strengths were listed.</p>}</div>
+      <div className="panel p-5"><h2 className="font-bold">Skill gaps</h2>{gaps.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{gaps.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">No priority gaps were identified.</p>}</div>
     </section>
     <section className="space-y-3"><h2 className="text-xl font-bold">Question breakdown</h2>{attempt.answers.map((answer, index) => ["MULTIPLE_CHOICE", "TRUE_FALSE"].includes(answer.question_type) ? <ObjectiveAnswerResult answer={answer} index={index} key={answer.question_id} /> : <WrittenAnswerResult answer={answer} index={index} key={answer.question_id} />)}</section>
     <section className="panel p-5"><h2 className="mb-4 text-xl font-bold">Recommended courses</h2><AdvisorRecommendationCards recommendations={analysis.recommendations} /></section>

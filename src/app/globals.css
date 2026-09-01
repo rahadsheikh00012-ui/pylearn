@@ -237,3 +237,9 @@ dialog.feedback-dialog { width: min(460px, calc(100vw - 2rem)); overflow: hidden
 .feedback-dialog-icon-warning { color: var(--warning); background: var(--warning-soft); }
 .feedback-dialog-actions { display: flex; justify-content: flex-end; gap: .7rem; margin-top: 1rem; padding: 1rem 1.5rem; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--background) 72%, var(--panel)); }
 @keyframes feedback-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Top-layer Loading Modal */
+dialog.loading-dialog { width: min(380px, calc(100vw - 2rem)); border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 30px 80px -15px rgb(0 0 0 / 0.55); z-index: 99999; }
+dialog.loading-dialog[open] { animation: feedback-dialog-in .15s ease-out; }
+dialog.loading-dialog::backdrop { background: rgb(0 0 0 / 65%); backdrop-filter: blur(4px); }
+

@@ -199,8 +199,6 @@ class AdvisorAttemptViewSet(viewsets.ReadOnlyModelViewSet):
                 analysis = attempt.advisor_analysis
             except AdvisorAnalysis.DoesNotExist:
                 return Response({"detail": "This attempt has no analyzed draft to publish."}, status=400)
-            if attempt.quiz.quiz_type == Quiz.QuizType.SKILL_DISCOVERY and not analysis.strongest_field_id:
-                return Response({"detail": "Skill Discovery requires a strongest field."}, status=400)
             attempt.analysis_status = QuizAttempt.AnalysisStatus.PUBLISHED
             attempt.published_at = timezone.now()
             attempt.save(update_fields=["analysis_status", "published_at", "updated_at"])

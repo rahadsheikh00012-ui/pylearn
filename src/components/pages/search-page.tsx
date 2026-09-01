@@ -19,7 +19,7 @@ const labels:Record<string,string> = { all:"All",courses:"Courses",materials:"Ma
 const icons = { courses:BookOpen,materials:FileText,quizzes:ClipboardCheck,enrollments:GraduationCap,learning_paths:GraduationCap,students:Users,users:UserRound,payments:WalletCards,certificates:ShieldCheck,applications:ClipboardCheck };
 const copy:Record<Role,{title:string;description:string;placeholder:string}> = {
   STUDENT:{title:"Search and Discovery",description:"Find courses, your learning materials, quizzes, and personalized learning paths.",placeholder:"Search courses, materials, quizzes, and topics..."},
-  INSTRUCTOR:{title:"Instructor Search",description:"Find owned teaching content, enrolled students, and published courses.",placeholder:"Search courses, materials, quizzes, or enrolled students..."},
+  INSTRUCTOR:{title:"Instructor Search",description:"Find your owned courses, learning materials, quizzes, and enrolled students.",placeholder:"Search your courses, materials, quizzes, or enrolled students..."},
   ADMIN:{title:"Administration Search",description:"Find learning content, people, payments, certificates, enrollments, and applications.",placeholder:"Search by title, code, email, transaction, certificate, or reference..."},
 };
 const shortcuts:Record<Role,string[]> = {

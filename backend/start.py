@@ -12,6 +12,12 @@ call_command("collectstatic", interactive=False, verbosity=1)
 call_command("migrate", interactive=False, verbosity=1)
 
 port = os.getenv("PORT", "8000")
+if os.getenv("DJANGO_DEBUG", "false").lower() in ("true", "1", "yes"):
+    from django.core.management import execute_from_command_line
+
+    execute_from_command_line(["manage.py", "runserver", f"0.0.0.0:{port}"])
+    raise SystemExit(0)
+
 if sys.platform == "win32":
     from waitress import serve
 

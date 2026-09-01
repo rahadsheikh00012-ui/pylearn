@@ -1003,9 +1003,9 @@ class SearchView(APIView):
             quizzes = quizzes.filter(is_published=True).filter(Q(course__isnull=True) | Q(course__enrollments__student=request.user))
             allowed_tabs = ["all", "courses", "materials", "quizzes", "enrollments", "learning_paths"]
         elif role == User.Role.INSTRUCTOR:
-            courses = courses.filter(Q(instructor=request.user) | Q(status=Course.Status.PUBLISHED))
-            materials = materials.filter(Q(course__instructor=request.user) | Q(course__status=Course.Status.PUBLISHED))
-            quizzes = quizzes.filter(Q(course__instructor=request.user) | Q(course__status=Course.Status.PUBLISHED, is_published=True))
+            courses = courses.filter(instructor=request.user)
+            materials = materials.filter(course__instructor=request.user)
+            quizzes = quizzes.filter(course__instructor=request.user)
             allowed_tabs = ["all", "courses", "materials", "quizzes", "students"]
         else:
             allowed_tabs = ["all", "courses", "materials", "quizzes", "users", "enrollments", "payments", "certificates", "applications"]

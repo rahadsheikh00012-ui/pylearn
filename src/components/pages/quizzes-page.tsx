@@ -118,8 +118,8 @@ export function QuizzesPage() {
         topic: question.topic.trim() || "General",
         options: normalizedQuestionType === "MULTIPLE_CHOICE" ? multipleChoiceOptions : [],
         correct_answer: normalisedCorrectAnswer,
-        learning_field: question.learning_field,
-        advisor_skill: question.advisor_skill,
+        learning_field: activeTab === "development" ? question.learning_field : null,
+        advisor_skill: activeTab === "development" ? question.advisor_skill : null,
         grading_rubric: question.grading_rubric,
         points: Number(question.points),
         order: index,
@@ -475,7 +475,7 @@ export function QuizzesPage() {
                     </div>
                   )}
 
-                  {(activeTab === "initial" || activeTab === "development") && <div className="grid gap-4 md:grid-cols-2"><ModernSelect className="field" value={question.learning_field || undefined} placeholder="Learning field" options={advisorFields.data ? unwrap(advisorFields.data).map(f => ({ value: f.id, label: f.name })) : []} onValueChange={value => updateQuestion(index, { learning_field: Number(value), advisor_skill: null })} /><ModernSelect className="field" value={question.advisor_skill || undefined} placeholder="Measured skill" options={(advisorFields.data ? unwrap(advisorFields.data) : []).find(f => f.id === question.learning_field)?.skills.map(s => ({ value: s.id, label: s.name })) || []} onValueChange={value => updateQuestion(index, { advisor_skill: Number(value) })} /></div>}
+                  {activeTab === "development" && <div className="grid gap-4 md:grid-cols-2"><ModernSelect className="field" value={question.learning_field || undefined} placeholder="Learning field" options={advisorFields.data ? unwrap(advisorFields.data).map(f => ({ value: f.id, label: f.name })) : []} onValueChange={value => updateQuestion(index, { learning_field: Number(value), advisor_skill: null })} /><ModernSelect className="field" value={question.advisor_skill || undefined} placeholder="Measured skill" options={(advisorFields.data ? unwrap(advisorFields.data) : []).find(f => f.id === question.learning_field)?.skills.map(s => ({ value: s.id, label: s.name })) || []} onValueChange={value => updateQuestion(index, { advisor_skill: Number(value) })} /></div>}
                   {(question.question_type === "SHORT_ANSWER" || question.question_type === "LONG_ANSWER") && <textarea className="field" value={question.grading_rubric} onChange={event => updateQuestion(index, { grading_rubric: event.target.value })} placeholder="AI grading rubric or reference answer" required rows={3} />}
 
                   <div className="grid gap-4 md:grid-cols-2">

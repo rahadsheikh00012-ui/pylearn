@@ -182,15 +182,28 @@ export function LoadingModal({
   title?: string;
   message?: string;
 }) {
-  if (!open) return null;
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (open && !dialog.open) {
+      dialog.showModal();
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+  }, [open]);
 
   return (
-    <div
-      className="fixed inset-0 z-[80] grid place-items-center bg-black/45 px-4 backdrop-blur-sm"
+    <dialog
+      ref={dialogRef}
+      onCancel={(e) => e.preventDefault()}
+      className="loading-dialog m-auto border border-[var(--border)] bg-[var(--panel)] p-6 text-[var(--foreground)] shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-sm"
       role="status"
       aria-live="polite"
     >
-      <div className="panel w-full max-w-sm p-6 text-center shadow-2xl">
+      <div className="text-center">
         <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-[color-mix(in_srgb,var(--primary)_14%,transparent)] text-[var(--primary)]">
           <LoaderCircle
             className="animate-spin"
@@ -201,7 +214,7 @@ export function LoadingModal({
         <h2 className="mt-4 text-lg font-bold">{title}</h2>
         <p className="muted mt-2 text-sm">{message}</p>
       </div>
-    </div>
+    </dialog>
   );
 }
 

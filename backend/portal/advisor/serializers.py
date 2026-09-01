@@ -54,10 +54,35 @@ class RecommendationSerializer(serializers.ModelSerializer):
 class AnalysisSerializer(serializers.ModelSerializer):
     strongest_field_name = serializers.CharField(source="strongest_field.name", read_only=True)
     strongest_skill_names = serializers.SerializerMethodField()
+    strengths = serializers.SerializerMethodField()
+    gaps = serializers.SerializerMethodField()
     recommendations = RecommendationSerializer(many=True, read_only=True)
 
+    def _normalize_list(self, raw):
+        if isinstance(raw, str):
+            return [line.strip() for line in raw.split("\n") if line.strip()]
+        if isinstance(raw, list):
+            res = []
+            for item in raw:
+                if isinstance(item, str) and item.strip():
+                    res.append(item.strip())
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("skill") or item.get("description") or str(item)
+                    if name:
+                        res.append(str(name).strip())
+            return res
+        return []
+
     def get_strongest_skill_names(self, obj):
-        return list(AdvisorSkill.objects.filter(pk__in=obj.strongest_skills).values_list("name", flat=True))
+        if isinstance(obj.strongest_skills, list):
+            return list(AdvisorSkill.objects.filter(pk__in=[k for k in obj.strongest_skills if isinstance(k, int)]).values_list("name", flat=True))
+        return []
+
+    def get_strengths(self, obj):
+        return self._normalize_list(obj.strengths)
+
+    def get_gaps(self, obj):
+        return self._normalize_list(obj.gaps)
 
     class Meta:
         model = AdvisorAnalysis

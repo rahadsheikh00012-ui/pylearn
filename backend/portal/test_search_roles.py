@@ -41,7 +41,7 @@ class RoleAwareSearchTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         course_titles = [item["title"] for item in response.data["groups"]["courses"]["results"]]
         self.assertIn(self.owned.title, course_titles)
-        self.assertIn(self.public.title, course_titles)
+        self.assertNotIn(self.public.title, course_titles)
         self.assertNotIn(self.private.title, course_titles)
         students_response = self.search(self.instructor, tab="students")
         student_titles = [item["title"] for item in students_response.data["groups"]["students"]["results"]]
