@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { api, jsonBody, unwrap } from "@/lib/api";
 import type { Category, Course } from "@/lib/types";
-import { useAuth } from "@/components/auth-provider";
 import {
   Empty,
   ErrorMessage,
@@ -73,7 +72,6 @@ const bdtFormatter = new Intl.NumberFormat("en-BD", {
 
 export function AdminCoursesWorkspace({ onBack }: { onBack?: () => void }) {
   const router = useRouter();
-  const { user } = useAuth();
   const { confirm: confirmDialog, notify, prompt: promptDialog } = useFeedbackDialog();
 
   const {
@@ -329,7 +327,7 @@ export function AdminCoursesWorkspace({ onBack }: { onBack?: () => void }) {
               placeholder="Search courses..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="field w-full text-sm !pl-10"
+              className="field w-full text-sm !pl-12"
             />
           </div>
 

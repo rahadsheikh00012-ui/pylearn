@@ -42,7 +42,7 @@ export function PublishedAdvisorResult({ attempt }: { attempt: AdvisorAttempt })
     <section className="panel border-[var(--primary)] p-6">
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div><span className="badge">Admin reviewed</span><h2 className="mt-3 text-2xl font-bold">{discovery ? "Your Skill Discovery result" : "Your Skill Development result"}</h2><p className="muted mt-2 max-w-2xl">{analysis.summary}</p></div>
-        <div className="text-right"><div className="text-4xl font-bold text-[var(--primary)]">{attempt.percentage ?? "—"}%</div><div className="mt-1 font-semibold">{analysis.level ? analysis.level.toLowerCase().replace(/^./, value => value.toUpperCase()) : "Diagnostic result"}</div></div>
+        <div className="text-right"><div className="text-4xl font-bold text-[var(--primary)]">{attempt.percentage ?? "-"}%</div><div className="mt-1 font-semibold">{analysis.level ? analysis.level.toLowerCase().replace(/^./, value => value.toUpperCase()) : "Diagnostic result"}</div></div>
       </div>
       {discovery && analysis.strongest_field_name && <p className="mt-5"><strong>Strongest field:</strong> {analysis.strongest_field_name}</p>}
       {discovery && analysis.strongest_skill_names.length > 0 && <p className="mt-2"><strong>Strongest skills:</strong> {analysis.strongest_skill_names.join(", ")}</p>}

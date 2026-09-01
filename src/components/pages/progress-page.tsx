@@ -85,7 +85,7 @@ export function ProgressPage() {
           <td><button type="button" className="whitespace-nowrap font-semibold text-[var(--primary)] hover:underline" onClick={event => { event.stopPropagation(); setSelectedCourse(course); }}>View details</button></td>
         </tr>)}</tbody></table>
       </div>}
-      <Modal open={Boolean(selectedCourse)} title={selectedCourse ? `${selectedCourse.title} — Progress` : "Course Progress"} onCloseAction={() => setSelectedCourse(null)} size="wide">
+      <Modal open={Boolean(selectedCourse)} title={selectedCourse ? `${selectedCourse.title}: Progress` : "Course Progress"} onCloseAction={() => setSelectedCourse(null)} size="wide">
         {selectedCourse && <CourseProgressDetails course={selectedCourse} report={report} />}
       </Modal>
     </div>;
@@ -104,7 +104,7 @@ export function ProgressPage() {
         <td><button type="button" className="whitespace-nowrap font-semibold text-[var(--primary)] hover:underline" onClick={event => { event.stopPropagation(); setSelectedStudent(summary); }}>View details</button></td>
       </tr>)}</tbody></table>
     </div>}
-    <Modal open={Boolean(selectedStudent)} title={selectedStudent ? `${selectedStudent.student.name} — Progress Report` : "Student Progress Report"} onCloseAction={() => setSelectedStudent(null)} size="wide">
+    <Modal open={Boolean(selectedStudent)} title={selectedStudent ? `${selectedStudent.student.name}: Progress Report` : "Student Progress Report"} onCloseAction={() => setSelectedStudent(null)} size="wide">
       {detail.loading && !selectedDetail ? <Loading variant="detail" /> : detail.error ? <ErrorMessage message={detail.error} /> : selectedDetail ? <ProgressReport report={selectedDetail} /> : <Loading variant="detail" />}
     </Modal>
   </div>;

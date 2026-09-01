@@ -5,6 +5,7 @@ import { api, jsonBody, unwrap } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
 import { useAuth } from "@/components/auth-provider";
 import { Empty, ErrorMessage, Loading, LoadingModal, Modal, PageHeader } from "@/components/ui";
+import { ModernSelect } from "@/components/modern-select";
 import type { Course } from "@/lib/types";
 
 type PaymentStatus = "PENDING" | "APPROVED" | "REJECTED";
@@ -73,7 +74,7 @@ export function PaymentsPage() {
   }
   async function openProof(payment:Payment){
     setBusyMessage("Loading private receipt…");setFormError("");
-    try{const response=await fetch(`/backend-api/payments/${payment.id}/proof/`,{credentials:"include"});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||"Unable to load payment proof.")}if(proofUrl)URL.revokeObjectURL(proofUrl);setProofUrl(URL.createObjectURL(await response.blob()));setProofTitle(`${payment.student_name} — ${payment.course_title}`)}
+    try{const response=await fetch(`/backend-api/payments/${payment.id}/proof/`,{credentials:"include"});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||"Unable to load payment proof.")}if(proofUrl)URL.revokeObjectURL(proofUrl);setProofUrl(URL.createObjectURL(await response.blob()));setProofTitle(`${payment.student_name}: ${payment.course_title}`)}
     catch(error){setFormError(error instanceof Error?error.message:"Unable to load payment proof.")}finally{setBusyMessage("")}
   }
   function closeProof(){if(proofUrl)URL.revokeObjectURL(proofUrl);setProofUrl("");setProofTitle("")}
@@ -91,7 +92,7 @@ export function PaymentsPage() {
     {user?.role==="ADMIN"&&<>
       <form className="panel grid gap-4 p-5 md:grid-cols-2" onSubmit={saveMethod}>
         <div className="md:col-span-2 flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">{editingMethod?"Edit payment account":"Add payment account"}</h2><p className="muted text-sm">Multiple accounts per payment method are supported.</p></div>{editingMethod&&<button className="btn btn-secondary" type="button" onClick={resetMethodForm}>Cancel edit</button>}</div>
-        <select className="field" value={methodForm.method} onChange={e=>setMethodForm({...methodForm,method:e.target.value as MethodCode})} required><option value="BKASH">bKash</option><option value="NAGAD">Nagad</option><option value="BANK_PAY">Bank Pay</option></select>
+        <ModernSelect className="field" aria-label="Payment method" value={methodForm.method} onValueChange={value=>setMethodForm({...methodForm,method:value as MethodCode})} required options={[{value:"BKASH",label:"bKash"},{value:"NAGAD",label:"Nagad"},{value:"BANK_PAY",label:"Bank Pay"}]}/>
         <input className="field" value={methodForm.display_name} onChange={e=>setMethodForm({...methodForm,display_name:e.target.value})} placeholder="Display name, e.g. bKash Merchant" required/>
         <textarea className="field" value={methodForm.account_details} onChange={e=>setMethodForm({...methodForm,account_details:e.target.value})} placeholder="Account number or bank details" required/>
         <input className="field" value={methodForm.account_holder} onChange={e=>setMethodForm({...methodForm,account_holder:e.target.value})} placeholder="Account holder"/>
@@ -106,8 +107,8 @@ export function PaymentsPage() {
       <div className="grid-cards">{methodRows.map(m=><article className="panel space-y-2 p-4" key={m.id}><span className="badge">{m.method.replace("_"," ")}</span><h2 className="font-bold">{m.display_name}</h2><p className="whitespace-pre-wrap">{m.account_details}</p><p className="muted text-sm">{m.account_holder}</p><p className="muted whitespace-pre-wrap text-sm">{m.instructions}</p></article>)}</div>
       <form className="panel grid gap-4 p-5 md:grid-cols-2" onSubmit={submitPayment} encType="multipart/form-data">
         <div className="md:col-span-2"><h2 className="text-xl font-bold">Submit course payment</h2><p className="muted text-sm">Enrollment begins only after admin approval.</p></div>
-        <select className="field" value={selectedCourseId} onChange={e=>setSelectedCourseId(e.target.value)} required><option value="">Select paid course</option>{courseRows.map(c=><option value={c.id} key={c.id}>{c.title} — {money(c.price)}</option>)}</select>
-        <select className="field" value={selectedMethodId} onChange={e=>setSelectedMethodId(e.target.value)} required><option value="">Select payment account</option>{methodRows.map(m=><option value={m.id} key={m.id}>{m.display_name} ({m.method.replace("_"," ")})</option>)}</select>
+        <ModernSelect className="field" aria-label="Paid course" value={selectedCourseId} onValueChange={setSelectedCourseId} placeholder="Select paid course" required options={courseRows.map(c=>({value:c.id,label:`${c.title}: ${money(c.price)}`}))}/>
+        <ModernSelect className="field" aria-label="Payment account" value={selectedMethodId} onValueChange={setSelectedMethodId} placeholder="Select payment account" required options={methodRows.map(m=>({value:m.id,label:`${m.display_name} (${m.method.replace("_"," ")})`}))}/>
         {selectedMethod&&<div className="panel md:col-span-2 p-4 text-sm"><strong>{selectedMethod.display_name}</strong><p className="mt-1 whitespace-pre-wrap">{selectedMethod.account_details}</p><p className="muted mt-1 whitespace-pre-wrap">{selectedMethod.instructions}</p></div>}
         <input className="field" name="sender_details" placeholder="Sender account / bank details" required/><input className="field" name="transaction_id" placeholder="Transaction / reference ID" required/>
         <label className="block space-y-1"><span className="text-sm font-semibold">Exact amount (BDT)</span><input className="field" value={selectedCourse?selectedCourse.price:""} placeholder="Select a course" readOnly/></label>
@@ -118,7 +119,7 @@ export function PaymentsPage() {
     </>}
 
     <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">Payment records</h2>{user?.role==="ADMIN"&&<select className="field max-w-xs" value={statusFilter} onChange={e=>setStatusFilter(e.target.value as "ALL"|PaymentStatus)}><option value="ALL">All statuses</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select>}</div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">Payment records</h2>{user?.role==="ADMIN"&&<ModernSelect className="field max-w-xs" aria-label="Payment status" value={statusFilter} onValueChange={value=>setStatusFilter(value as "ALL"|PaymentStatus)} options={[{value:"ALL",label:"All statuses"},{value:"PENDING",label:"Pending"},{value:"APPROVED",label:"Approved"},{value:"REJECTED",label:"Rejected"}]}/>}</div>
       {!payments.length?<Empty message="No payment records."/>:payments.map(p=><article className="panel space-y-3 p-4" key={p.id}>
         <div className="flex flex-wrap items-start justify-between gap-3"><div><strong>{p.course_title}</strong><p className="muted text-sm">{p.student_name} · {p.method_display_name} · {p.transaction_id}</p></div><span className="badge">{p.status}</span></div>
         <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><span className="muted block text-xs">Amount paid</span>{money(p.amount)}</div><div><span className="muted block text-xs">Captured course price</span>{money(p.course_price_snapshot)}</div><div><span className="muted block text-xs">Payment date</span>{new Date(`${p.payment_date}T00:00:00`).toLocaleDateString()}</div><div><span className="muted block text-xs">Submitted</span>{new Date(p.created_at).toLocaleString()}</div></div>

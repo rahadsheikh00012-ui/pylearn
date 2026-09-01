@@ -127,7 +127,7 @@ export function NotificationsPage() {
           {totalNotifications > PAGE_SIZE && (
             <nav className="notification-pagination" aria-label="Email notification pages">
               <p className="muted text-sm">
-                Showing {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, totalNotifications)} of {totalNotifications}
+                Showing {pageStart + 1}-{Math.min(pageStart + PAGE_SIZE, totalNotifications)} of {totalNotifications}
               </p>
               <div className="notification-pagination-pages">
                 <button

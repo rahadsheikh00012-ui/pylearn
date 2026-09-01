@@ -13,17 +13,14 @@ import {
   FileEdit,
   GraduationCap,
   KeyRound,
-  Layers,
   PlusCircle,
-  ShieldAlert,
   Sparkles,
   Trash2,
   TrendingUp,
-  UserCheck,
   UserRound,
   Users,
 } from "lucide-react";
-import { PageHeader, Loading, ErrorMessage, Stat } from "@/components/ui";
+import { PageHeader, Loading, ErrorMessage } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { useApiData } from "@/hooks/use-api-data";
 import type { StudentDashboard } from "@/lib/types";

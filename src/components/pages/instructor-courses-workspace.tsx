@@ -5,23 +5,15 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
-  Calendar,
-  CheckCircle,
-  Clock,
   Download,
   Eye,
   FileText,
   HelpCircle,
   Info,
-  Layers,
   Lock,
-  Mail,
   Search,
-  ShieldAlert,
-  UserCheck,
   Users,
   Video,
-  XCircle,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type {
@@ -235,7 +227,7 @@ export function InstructorCoursesWorkspace({ onBack }: { onBack?: () => void }) 
                   placeholder="Search by instructor name, email, or department..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="field w-full !pl-10 text-sm"
+                  className="field w-full !pl-12 text-sm"
                 />
               </div>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, X } from "lucide-react";
 
 export function PageHeader({
   title,
@@ -320,7 +320,7 @@ export function Modal({
             className="text-xl leading-none text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
             aria-label="Close"
           >
-            ✕
+            <X size={20} aria-hidden="true" />
           </button>
         </div>
         <div className="p-5">{children}</div>
