@@ -33,7 +33,7 @@ def _provider_json(prompt):
         raw = response.json()["candidates"][0]["content"]["parts"][0]["text"]
     else:
         base = config.base_url or "https://api.openai.com/v1"
-        response = httpx.post(f"{base.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": config.model, "messages": [{"role": "system", "content": "You grade PyLearn advisor assessments. Return one valid JSON object only."}, {"role": "user", "content": prompt}], "temperature": 0.1, "response_format": {"type": "json_object"}}, timeout=timeout)
+        response = httpx.post(f"{base.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": config.model, "messages": [{"role": "system", "content": "You are a fair, semantic grader for PyLearn advisor assessments. Grade knowledge and meaning, never superficial formatting. Return one valid JSON object only."}, {"role": "user", "content": prompt}], "temperature": 0.1, "response_format": {"type": "json_object"}}, timeout=timeout)
         response.raise_for_status()
         raw = response.json()["choices"][0]["message"]["content"]
     cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -52,6 +52,31 @@ def _payload(attempt):
     }
 
 
+def _grading_prompt(attempt):
+    instructions = """Analyze and grade the complete Advisor attempt supplied below.
+
+Grading rules for every SHORT_ANSWER and LONG_ANSWER:
+- Grade semantic correctness: equivalent wording, capitalization, punctuation, grammar, word order, and extra correct explanation must not reduce the score.
+- In a reference answer, the pipe character | separates alternative accepted answers. It is never a literal response format. For example, "Continuous Integration|CI" means either phrase is accepted; "Continuous Integration (CI)" is fully correct.
+- Treat standard abbreviations and their expanded forms as equivalent when the context makes their meaning clear.
+- A response that contains all required concepts in the reference answer or rubric receives full points, even when it is more detailed than expected.
+- Give partial credit proportional to the correct required concepts demonstrated. Use zero only for blank, irrelevant, or substantively incorrect responses.
+- Do not demand an exact phrase or a concise format unless the question or grading rubric explicitly requires it.
+- Feedback must explain missing or incorrect concepts. Never claim a format mismatch merely because the wording differs from the reference answer.
+- awarded_points must be a number from 0 through that answer's max_points.
+
+Return one JSON object with these keys:
+- answer_grades: one item for every SHORT_ANSWER and LONG_ANSWER, containing answer_id, awarded_points, and feedback
+- summary, strongest_field_id, strongest_skill_ids, field_scores, strengths, gaps
+- recommendations: items containing course_id, match_type (ADVANCED, EXACT_MATCH, or BEST_RELATED), and reason
+
+Use only IDs supplied in the payload. Do not invent IDs.
+
+ATTEMPT PAYLOAD:
+"""
+    return instructions + json.dumps(_payload(attempt), default=str)
+
+
 def analyze_attempt(attempt_id, actor):
     with transaction.atomic():
         attempt = QuizAttempt.objects.select_for_update().select_related("quiz", "student").get(pk=attempt_id)
@@ -62,7 +87,7 @@ def analyze_attempt(attempt_id, actor):
         attempt.analysis_status = QuizAttempt.AnalysisStatus.ANALYZING
         attempt.analysis_error = ""
         attempt.save(update_fields=["analysis_status", "analysis_error", "updated_at"])
-    prompt = "Analyze the complete Advisor attempt below. Grade SHORT_ANSWER and LONG_ANSWER items. Return keys answer_grades (answer_id, awarded_points, feedback), summary, strongest_field_id, strongest_skill_ids, field_scores, strengths, gaps, recommendations (course_id, match_type ADVANCED|EXACT_MATCH|BEST_RELATED, reason). Use only supplied IDs.\n" + json.dumps(_payload(attempt), default=str)
+    prompt = _grading_prompt(attempt)
     try:
         data = _provider_json(prompt)
         with transaction.atomic():
@@ -102,10 +127,13 @@ def analyze_attempt(attempt_id, actor):
                     AdvisorRecommendation.objects.create(analysis=analysis, course=course, match_type=kind, reason=str(rec.get("reason", ""))[:2000])
             attempt.score, attempt.max_score, attempt.percentage = score, maximum, percentage
             attempt.passed = percentage >= attempt.quiz.passing_score
-            attempt.analysis_status = QuizAttempt.AnalysisStatus.DRAFT_READY
-            attempt.analyzed_at = timezone.now()
-            attempt.save(update_fields=["score", "max_score", "percentage", "passed", "analysis_status", "analyzed_at", "updated_at"])
+            published_at = timezone.now()
+            attempt.analysis_status = QuizAttempt.AnalysisStatus.PUBLISHED
+            attempt.analyzed_at = published_at
+            attempt.published_at = published_at
+            attempt.save(update_fields=["score", "max_score", "percentage", "passed", "analysis_status", "analyzed_at", "published_at", "updated_at"])
             AdvisorAuditLog.objects.create(analysis=analysis, actor=actor, action="AI_ANALYZED", changes={"result": data})
+            AdvisorAuditLog.objects.create(analysis=analysis, actor=actor, action="AUTO_PUBLISHED", changes={})
             return analysis
     except Exception as exc:
         QuizAttempt.objects.filter(pk=attempt_id).update(analysis_status=QuizAttempt.AnalysisStatus.ANALYSIS_FAILED, analysis_error=str(exc)[:2000])

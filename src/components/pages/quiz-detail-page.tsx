@@ -88,7 +88,7 @@ export function QuizDetailPage() {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      <LoadingModal open={submitting} title="Submitting attempt" message={quiz.quiz_type === "COURSE" ? "Scoring your answers." : "Saving your answers for AI analysis and admin review."} />
+      <LoadingModal open={submitting} title="Submitting attempt" message={quiz.quiz_type === "COURSE" ? "Scoring your answers." : "Saving your answers and generating your AI result."} />
       <LoadingModal open={revealingAnswers} title="Checking password" message="Unlocking correct answers." />
       <PageHeader title={quiz.title} description={quiz.description} />
 
@@ -132,7 +132,7 @@ export function QuizDetailPage() {
           ) : visibleResult && isAdvisor && (
             <div className="panel border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_10%,transparent)] p-5 text-center">
               <strong>{studentAdvisorStatusLabel(advisorStatus)}</strong>
-              <p className="muted mt-2 text-sm">{advisorStatus === "DRAFT_READY" ? "The analysis is waiting for administrator review and publication. No provisional result is shown." : advisorStatus === "ANALYSIS_FAILED" ? "Your answers are saved. An administrator can retry the analysis, review it, and publish the result." : "Your result will remain private until administrator review and publication."}</p>
+              <p className="muted mt-2 text-sm">{advisorStatus === "DRAFT_READY" ? "The analysis is awaiting publication." : advisorStatus === "ANALYSIS_FAILED" ? "Your answers are saved. An administrator can retry the AI analysis." : "Your AI result is being prepared and will publish automatically when complete."}</p>
               <Link className="btn btn-primary mt-4" href="/learning-path">View Learning Path Advisor</Link>
             </div>
           )}
@@ -240,13 +240,20 @@ export function QuizDetailPage() {
                       })
                     ) : (
                       <>
-                        <input
-                          className="field mt-3"
+                        <textarea
+                          className="field mt-3 min-h-[44px] resize-y overflow-auto"
                           name={String(q.id)}
                           placeholder={showResult ? qResult?.submitted_answer || "No answer provided" : "Type your answer here..."}
                           required={!isReadOnly}
                           disabled={isReadOnly}
                           defaultValue={showResult ? qResult?.submitted_answer : undefined}
+                          rows={1}
+                          onInput={(event) => {
+                            const answer = event.currentTarget;
+                            if (answer.scrollHeight > answer.clientHeight) {
+                              answer.style.height = `${answer.scrollHeight}px`;
+                            }
+                          }}
                         />
                         {showResult && qResult && (
                           <div className={`mt-2 p-3 rounded-lg border text-sm ${qResult.is_correct ? "bg-green-50 border-green-500 text-green-800 dark:bg-green-900/20 dark:text-green-200" : "bg-red-50 border-red-500 text-red-800 dark:bg-red-900/20 dark:text-red-200"}`}>
