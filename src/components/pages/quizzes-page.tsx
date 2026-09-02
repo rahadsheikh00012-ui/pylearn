@@ -227,7 +227,7 @@ export function QuizzesPage() {
         >
           General Quizzes
         </button>
-        {user?.role !== "INSTRUCTOR" && user?.role !== "STUDENT" && (
+        {user?.role === "ADMIN" && (
           <button
             className={`pb-2 px-1 font-semibold ${activeTab === "initial" ? "border-b-2 border-[var(--primary)] text-[var(--foreground)]" : "text-[var(--muted)]"}`}
             onClick={() => setActiveTab("initial")}
@@ -235,7 +235,7 @@ export function QuizzesPage() {
             Skill discoveries
           </button>
         )}
-        {user?.role !== "INSTRUCTOR" && user?.role !== "STUDENT" && (
+        {user?.role === "ADMIN" && (
           <button
             className={`pb-2 px-1 font-semibold ${activeTab === "development" ? "border-b-2 border-[var(--primary)] text-[var(--foreground)]" : "text-[var(--muted)]"}`}
             onClick={() => setActiveTab("development")}
