@@ -1,5 +1,4 @@
 from decimal import Decimal
-from io import BytesIO
 import base64
 import json
 import mimetypes
@@ -49,6 +48,7 @@ from .services import (
 )
 from .throttles import AuthRateThrottle, PasswordResetRateThrottle
 from .advisor.analysis import analyze_attempt
+from .certificate_renderer import render_certificate_pdf
 
 
 def is_admin(user):
@@ -75,7 +75,7 @@ def issue_certificate_if_eligible(student, course):
     completed_ids = set(enrollment.material_progress.values_list("material_id", flat=True))
     quizzes = list(course.quizzes.filter(is_published=True, quiz_type=Quiz.QuizType.COURSE))
     passed_quiz_ids = set(QuizAttempt.objects.filter(student=student, quiz__in=quizzes, passed=True).values_list("quiz_id", flat=True))
-    if not material_ids or completed_ids != material_ids or not quizzes or any(quiz.pk not in passed_quiz_ids for quiz in quizzes):
+    if not material_ids or completed_ids != material_ids or any(quiz.pk not in passed_quiz_ids for quiz in quizzes):
         return None
     instructor_name = (course.instructor.get_full_name() or course.instructor.email) if course.instructor else "PyLearn Admin"
     certificate, _ = Certificate.objects.get_or_create(student=student, course=course, defaults={
@@ -536,31 +536,14 @@ class CertificateViewSet(viewsets.ReadOnlyModelViewSet):
             return qs
         if is_instructor(self.request.user):
             return qs.filter(course__instructor=self.request.user)
+        for enrollment in Enrollment.objects.filter(student=self.request.user).select_related("course"):
+            issue_certificate_if_eligible(self.request.user, enrollment.course)
         return qs.filter(student=self.request.user)
 
     @action(detail=True, methods=["get"])
     def download(self, request, verification_number=None):
         certificate = self.get_object()
-        from reportlab.lib.colors import HexColor
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.pdfgen import canvas
-        buffer = BytesIO()
-        page = landscape(A4)
-        pdf = canvas.Canvas(buffer, pagesize=page)
-        width, height = page
-        pdf.setStrokeColor(HexColor("#2563EB")); pdf.setLineWidth(5); pdf.rect(24, 24, width - 48, height - 48)
-        pdf.setFillColor(HexColor("#0F172A")); pdf.setFont("Helvetica-Bold", 30); pdf.drawCentredString(width / 2, height - 105, "PyLearn Certificate of Completion")
-        pdf.setFont("Helvetica", 15); pdf.drawCentredString(width / 2, height - 155, "This certificate is proudly presented to")
-        pdf.setFillColor(HexColor("#2563EB")); pdf.setFont("Helvetica-Bold", 27); pdf.drawCentredString(width / 2, height - 205, certificate.student_name)
-        pdf.setFillColor(HexColor("#0F172A")); pdf.setFont("Helvetica", 15); pdf.drawCentredString(width / 2, height - 250, "for successfully completing")
-        pdf.setFont("Helvetica-Bold", 22); pdf.drawCentredString(width / 2, height - 292, certificate.course_title)
-        pdf.setFont("Helvetica", 12); pdf.drawString(70, 82, f"Instructor: {certificate.instructor_name}")
-        pdf.drawCentredString(width / 2, 82, f"Issued: {certificate.issued_at.date().isoformat()}")
-        pdf.drawRightString(width - 70, 82, f"Verify: {certificate.verification_number}")
-        if certificate.revoked_at:
-            pdf.setFillColor(HexColor("#B91C1C")); pdf.setFont("Helvetica-Bold", 18); pdf.drawCentredString(width / 2, 45, "REVOKED")
-        pdf.showPage(); pdf.save(); buffer.seek(0)
-        response = HttpResponse(buffer.getvalue(), content_type="application/pdf")
+        response = HttpResponse(render_certificate_pdf(certificate), content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="pylearn-{certificate.verification_number}.pdf"'
         return response
 
@@ -713,7 +696,13 @@ class MaterialViewSet(viewsets.ModelViewSet):
         material = self.get_object()
         if not material.file:
             return Response({"detail": "This material has no downloadable file."}, status=status.HTTP_404_NOT_FOUND)
-        return FileResponse(material.file.open("rb"), as_attachment=True, filename=material.file.name.rsplit("/", 1)[-1])
+        file_handle = material.file.open("rb")
+        if request.user.role == User.Role.STUDENT and material.material_type == LearningMaterial.MaterialType.PDF:
+            enrollment = get_object_or_404(Enrollment, student=request.user, course=material.course)
+            _, created = MaterialProgress.objects.get_or_create(enrollment=enrollment, material=material)
+            if created:
+                issue_certificate_if_eligible(request.user, material.course)
+        return FileResponse(file_handle, as_attachment=True, filename=material.file.name.rsplit("/", 1)[-1])
 
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
@@ -721,12 +710,19 @@ class MaterialViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Only Students track material completion."}, status=status.HTTP_403_FORBIDDEN)
         material = self.get_object()
         enrollment = get_object_or_404(Enrollment, student=request.user, course=material.course)
-        progress, created = MaterialProgress.objects.get_or_create(enrollment=enrollment, material=material)
         if request.data.get("completed") is False:
-            progress.delete()
-        else:
-            issue_certificate_if_eligible(request.user, material.course)
-        return Response({"completed": created or request.data.get("completed") is not False})
+            MaterialProgress.objects.filter(enrollment=enrollment, material=material).delete()
+            return Response({"completed": False})
+        if material.material_type == LearningMaterial.MaterialType.PDF:
+            if not MaterialProgress.objects.filter(enrollment=enrollment, material=material).exists():
+                return Response(
+                    {"detail": "Download this PDF before completing it."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response({"completed": True})
+        MaterialProgress.objects.get_or_create(enrollment=enrollment, material=material)
+        issue_certificate_if_eligible(request.user, material.course)
+        return Response({"completed": True})
 
 
 class EnrollmentViewSet(viewsets.ModelViewSet):
@@ -1122,6 +1118,9 @@ def progress_payload(student, instructor=None):
         quiz_total = required_quizzes.count()
         quizzes_passed = required_quizzes.filter(attempts__student=student, attempts__passed=True).distinct().count()
         certificate = Certificate.objects.filter(student=student, course=enrollment.course).first()
+        certificate_eligible = bool(total and completed == total and quizzes_passed == quiz_total)
+        if certificate_eligible and not certificate:
+            certificate = issue_certificate_if_eligible(student, enrollment.course)
         courses.append({
             "course_id": enrollment.course_id,
             "course_code": enrollment.course.course_code,
@@ -1131,7 +1130,7 @@ def progress_payload(student, instructor=None):
             "completion": round(completed / total * 100, 2) if total else 0,
             "quizzes_passed": quizzes_passed,
             "quiz_total": quiz_total,
-            "certificate_eligible": bool(total and completed == total and quiz_total and quizzes_passed == quiz_total),
+            "certificate_eligible": certificate_eligible,
             "certificate_number": certificate.verification_number if certificate else None,
         })
     weak_topics = []

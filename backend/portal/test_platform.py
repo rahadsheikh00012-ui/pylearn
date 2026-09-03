@@ -243,6 +243,150 @@ class PlatformDomainTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(Certificate.objects.filter(student=self.student, course=course).exists())
 
+    def test_course_without_quizzes_is_certificate_eligible_after_all_materials(self):
+        course = Course.objects.create(title="Materials Only", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED)
+        enrollment = Enrollment.objects.create(student=self.student, course=course)
+        material = LearningMaterial.objects.create(course=course, title="Lesson", material_type="NOTE", note_content="Learn")
+        self.client.force_authenticate(self.student)
+
+        completed = self.client.post(f"/api/v1/materials/{material.pk}/complete/", {"completed": True}, format="json")
+        progress = self.client.get("/api/v1/progress/")
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertTrue(MaterialProgress.objects.filter(enrollment=enrollment, material=material).exists())
+        self.assertTrue(Certificate.objects.filter(student=self.student, course=course).exists())
+        course_progress = next(item for item in progress.data["courses"] if item["course_id"] == course.pk)
+        self.assertEqual((course_progress["quizzes_passed"], course_progress["quiz_total"]), (0, 0))
+        self.assertTrue(course_progress["certificate_eligible"])
+
+    def test_course_with_unpassed_quiz_remains_ineligible(self):
+        course = Course.objects.create(title="Quiz Required", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED)
+        enrollment = Enrollment.objects.create(student=self.student, course=course)
+        material = LearningMaterial.objects.create(course=course, title="Lesson", material_type="NOTE", note_content="Learn")
+        MaterialProgress.objects.create(enrollment=enrollment, material=material)
+        Quiz.objects.create(course=course, title="Final", is_published=True, results_published=True)
+        self.client.force_authenticate(self.student)
+
+        progress = self.client.get("/api/v1/progress/")
+
+        course_progress = next(item for item in progress.data["courses"] if item["course_id"] == course.pk)
+        self.assertEqual((course_progress["quizzes_passed"], course_progress["quiz_total"]), (0, 1))
+        self.assertFalse(course_progress["certificate_eligible"])
+        self.assertFalse(Certificate.objects.filter(student=self.student, course=course).exists())
+
+    def test_progress_load_issues_certificate_for_existing_eligible_course(self):
+        course = Course.objects.create(title="Previously Completed", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED)
+        enrollment = Enrollment.objects.create(student=self.student, course=course)
+        material = LearningMaterial.objects.create(course=course, title="Lesson", material_type="NOTE", note_content="Learn")
+        MaterialProgress.objects.create(enrollment=enrollment, material=material)
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get("/api/v1/progress/")
+
+        self.assertEqual(response.status_code, 200)
+        certificate = Certificate.objects.get(student=self.student, course=course)
+        course_progress = next(item for item in response.data["courses"] if item["course_id"] == course.pk)
+        self.assertTrue(course_progress["certificate_eligible"])
+        self.assertEqual(course_progress["certificate_number"], certificate.verification_number)
+
+    def test_certificate_list_issues_missing_certificate_for_eligible_course(self):
+        course = Course.objects.create(title="Completed Before Listing", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED)
+        enrollment = Enrollment.objects.create(student=self.student, course=course)
+        material = LearningMaterial.objects.create(course=course, title="Lesson", material_type="NOTE", note_content="Learn")
+        MaterialProgress.objects.create(enrollment=enrollment, material=material)
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get("/api/v1/certificates/")
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.data.get("results", response.data)
+        certificate = Certificate.objects.get(student=self.student, course=course)
+        self.assertIn(certificate.verification_number, [row["verification_number"] for row in rows])
+
+    def test_pdf_download_completes_material_once(self):
+        course = Course.objects.create(title="PDF Course", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED)
+        enrollment = Enrollment.objects.create(student=self.student, course=course)
+        material = LearningMaterial.objects.create(
+            course=course, title="Handbook", material_type=LearningMaterial.MaterialType.PDF,
+            file=SimpleUploadedFile("handbook.pdf", b"%PDF-1.4\ntest", content_type="application/pdf"),
+        )
+        self.client.force_authenticate(self.student)
+
+        first = self.client.get(f"/api/v1/materials/{material.pk}/download/")
+        second = self.client.get(f"/api/v1/materials/{material.pk}/download/")
+
+        self.assertEqual((first.status_code, second.status_code), (200, 200))
+        self.assertEqual(MaterialProgress.objects.filter(enrollment=enrollment, material=material).count(), 1)
+
+    def test_pdf_cannot_be_manually_completed_before_download(self):
+        course = Course.objects.create(title="PDF Course", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED)
+        enrollment = Enrollment.objects.create(student=self.student, course=course)
+        material = LearningMaterial.objects.create(
+            course=course, title="Handbook", material_type=LearningMaterial.MaterialType.PDF,
+            file=SimpleUploadedFile("handbook.pdf", b"%PDF-1.4\ntest", content_type="application/pdf"),
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.post(f"/api/v1/materials/{material.pk}/complete/", {"completed": True}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(MaterialProgress.objects.filter(enrollment=enrollment, material=material).exists())
+
+    def test_pdf_download_can_issue_certificate(self):
+        course = Course.objects.create(title="PDF Course", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED)
+        Enrollment.objects.create(student=self.student, course=course)
+        material = LearningMaterial.objects.create(
+            course=course, title="Final handbook", material_type=LearningMaterial.MaterialType.PDF,
+            file=SimpleUploadedFile("final.pdf", b"%PDF-1.4\ntest", content_type="application/pdf"),
+        )
+        quiz = Quiz.objects.create(course=course, title="Final", is_published=True, results_published=True)
+        QuizAttempt.objects.create(quiz=quiz, student=self.student, score=1, max_score=1, percentage=100, passed=True)
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(f"/api/v1/materials/{material.pk}/download/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Certificate.objects.filter(student=self.student, course=course).exists())
+
+    def test_staff_pdf_download_does_not_create_student_progress(self):
+        course = Course.objects.create(title="Staff PDF", description="Course", category=self.category, instructor=self.instructor)
+        material = LearningMaterial.objects.create(
+            course=course, title="Handbook", material_type=LearningMaterial.MaterialType.PDF,
+            file=SimpleUploadedFile("staff.pdf", b"%PDF-1.4\ntest", content_type="application/pdf"),
+        )
+        self.client.force_authenticate(self.instructor)
+
+        response = self.client.get(f"/api/v1/materials/{material.pk}/download/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(MaterialProgress.objects.filter(material=material).exists())
+
+    def test_missing_pdf_file_does_not_create_progress(self):
+        course = Course.objects.create(title="Missing PDF", description="Course", category=self.category, instructor=self.instructor, status=Course.Status.PUBLISHED)
+        enrollment = Enrollment.objects.create(student=self.student, course=course)
+        material = LearningMaterial.objects.create(course=course, title="Missing", material_type=LearningMaterial.MaterialType.PDF)
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(f"/api/v1/materials/{material.pk}/download/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(MaterialProgress.objects.filter(enrollment=enrollment, material=material).exists())
+
+    def test_redesigned_certificate_download_is_a_pdf(self):
+        course = Course.objects.create(title="Certificate Design", description="Course", category=self.category, instructor=self.instructor)
+        certificate = Certificate.objects.create(
+            student=self.student, course=course, student_name="Student Example",
+            course_title=course.title, instructor_name="Teacher Example",
+        )
+        self.client.force_authenticate(self.student)
+
+        response = self.client.get(f"/api/v1/certificates/{certificate.verification_number}/download/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
+        self.assertGreater(len(response.content), 3000)
+
     @patch("portal.views.verify_firebase_id_token")
     def test_firebase_google_login_creates_student_session(self, verify_token):
         verify_token.return_value = {

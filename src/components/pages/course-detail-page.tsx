@@ -20,6 +20,7 @@ export function CourseDetailPage() {
   const [open, setOpen] = useState(false);
   const [formError, setFormError] = useState("");
   const [busyMessage, setBusyMessage] = useState("");
+  const [downloadingMaterialId, setDownloadingMaterialId] = useState<number | null>(null);
 
   async function upload(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -53,6 +54,36 @@ export function CourseDetailPage() {
       void notify(x instanceof Error ? x.message : "Failed to mark as complete", { tone: "error" });
     } finally {
       setBusyMessage("");
+    }
+  }
+
+  async function downloadMaterial(materialId: number, downloadUrl: string, title: string) {
+    setDownloadingMaterialId(materialId);
+    try {
+      const response = await fetch(downloadUrl, { credentials: "include" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || "Unable to download this material.");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+      const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+      const filename = encodedName ? decodeURIComponent(encodedName) : plainName || `${title}.pdf`;
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+      await reload();
+      void notify("PDF downloaded and marked complete.", { title: "Progress updated", tone: "success" });
+    } catch (x) {
+      void notify(x instanceof Error ? x.message : "Unable to download this material.", { tone: "error" });
+    } finally {
+      setDownloadingMaterialId(null);
     }
   }
 
@@ -129,11 +160,20 @@ export function CourseDetailPage() {
               </div>
               
               <div className="flex flex-wrap items-center gap-2 mt-2 md:mt-0 md:flex-col lg:flex-row md:self-stretch md:items-start">
-                {m.download_url && (
+                {m.download_url && (user?.role === "STUDENT" && m.material_type === "PDF" ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary w-full md:w-auto text-center"
+                    disabled={downloadingMaterialId === m.id}
+                    onClick={() => void downloadMaterial(m.id, m.download_url!, m.title)}
+                  >
+                    {downloadingMaterialId === m.id ? "Downloading…" : m.completed ? "Download again" : "Download PDF"}
+                  </button>
+                ) : (
                   <a className="btn btn-secondary w-full md:w-auto text-center" href={m.download_url} download>
                     Download
                   </a>
-                )}
+                ))}
                 
                 {user?.role === "STUDENT" && m.completed && (
                   <span className="inline-flex min-h-10 w-full md:w-auto items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--success-soft)] px-4 py-2 text-sm font-bold text-[var(--success)]">
@@ -141,10 +181,14 @@ export function CourseDetailPage() {
                   </span>
                 )}
 
-                {user?.role === "STUDENT" && !m.completed && (
+                {user?.role === "STUDENT" && !m.completed && m.material_type !== "PDF" && (
                   <button className="btn btn-primary w-full md:w-auto" onClick={() => void complete(m.id)}>
                     Mark complete
                   </button>
+                )}
+
+                {user?.role === "STUDENT" && !m.completed && m.material_type === "PDF" && (
+                  <span className="muted max-w-44 text-center text-xs">Download this PDF to complete it.</span>
                 )}
                 
                 {user?.role !== "STUDENT" && (

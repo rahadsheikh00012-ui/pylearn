@@ -48,6 +48,7 @@ htmlcov/
 
 # typescript
 *.tsbuildinfo
+
 next-env.d.ts
 local-*
 
@@ -84,3 +85,4 @@ public/course-management-admin-plan.html
 public/search-role-mockup.html
 public/skill-development-quiz-mockup.html
 public/client-improvements-mockup.html
+public/admin-certificate-template-builder-mockup.html

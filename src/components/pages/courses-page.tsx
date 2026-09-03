@@ -15,7 +15,7 @@ import {
   Users,
 } from "lucide-react";
 import { api, jsonBody, unwrap } from "@/lib/api";
-import type { Category, Course, CourseManagementOverview } from "@/lib/types";
+import type { Category, Course, CourseManagementOverview, Enrollment } from "@/lib/types";
 import { useAuth } from "@/components/auth-provider";
 import {
   Empty,
@@ -308,6 +308,9 @@ function CoursesPageContent() {
     useApiData<Course[] | { results: Course[] }>("/courses/");
   const categories =
     useApiData<Category[] | { results: Category[] }>("/categories/");
+  const enrollmentResult = useApiData<Enrollment[] | { results: Enrollment[] }>(
+    user?.role === "STUDENT" ? "/enrollments/" : null
+  );
 
   // Modal & Form States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -316,8 +319,14 @@ function CoursesPageContent() {
   const [enrollingCourseId, setEnrollingCourseId] = useState<number | null>(null);
   const [busyMessage, setBusyMessage] = useState("");
   const [courseType, setCourseType] = useState<"FREE" | "PAID">("FREE");
+  const [studentCourseTab, setStudentCourseTab] = useState<"all" | "my">("all");
 
   const courses = data ? unwrap(data) : [];
+  const enrollments = enrollmentResult.data ? unwrap(enrollmentResult.data) : [];
+  const enrollmentByCourse = new Map(enrollments.map((item) => [item.course, item]));
+  const visibleCourses = user?.role === "STUDENT" && studentCourseTab === "my"
+    ? courses.filter((course) => course.is_enrolled)
+    : courses;
 
   function openNewCourseModal() {
     setEditingCourse(null);
@@ -436,6 +445,7 @@ function CoursesPageContent() {
         body: jsonBody({ course: id }),
       });
       await reload();
+      await enrollmentResult.reload();
       void notify("Enrollment confirmed.", {
         title: "Enrollment confirmed",
         tone: "success",
@@ -774,8 +784,42 @@ function CoursesPageContent() {
           </table>
         </div>
       ) : (
-        <div className="grid-cards">
-          {courses.map((course) => (
+        <div className="space-y-5">
+          {user?.role === "STUDENT" && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-3" role="tablist" aria-label="Course collection">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={studentCourseTab === "all"}
+                className={studentCourseTab === "all" ? "btn btn-primary" : "btn btn-secondary"}
+                onClick={() => setStudentCourseTab("all")}
+              >
+                All Courses
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={studentCourseTab === "my"}
+                className={studentCourseTab === "my" ? "btn btn-primary" : "btn btn-secondary"}
+                onClick={() => setStudentCourseTab("my")}
+              >
+                My Courses <span className="badge ml-1">{enrollments.length}</span>
+              </button>
+            </div>
+          )}
+
+          {user?.role === "STUDENT" && enrollmentResult.error ? (
+            <ErrorMessage message={enrollmentResult.error} />
+          ) : user?.role === "STUDENT" && studentCourseTab === "my" && enrollmentResult.loading ? (
+            <Loading variant="list" />
+          ) : visibleCourses.length === 0 ? (
+            <Empty message="You have not enrolled in any courses yet. Browse All Courses to get started." />
+          ) : (
+          <div className="grid-cards">
+          {visibleCourses.map((course) => {
+            const enrollment = enrollmentByCourse.get(course.id);
+            const progress = enrollment?.progress ?? 0;
+            return (
             <article
               key={course.id}
               className="panel flex flex-col overflow-hidden"
@@ -830,12 +874,26 @@ function CoursesPageContent() {
                   <span>{course.enrollment_count} enrolled</span>
                 </div>
 
+                {user?.role === "STUDENT" && course.is_enrolled && (
+                  <div className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                      <span className="font-semibold">Course progress</span>
+                      <strong className={progress === 100 ? "text-[var(--success)]" : "text-[var(--primary)]"}>
+                        {Math.round(progress)}%
+                      </strong>
+                    </div>
+                    <progress className="h-2 w-full accent-[var(--primary)]" value={progress} max={100} aria-label={`${course.title} progress`} />
+                  </div>
+                )}
+
                 <div className="mt-5 flex flex-wrap items-center gap-2">
                   <Link
-                    className="btn btn-secondary"
+                    className={user?.role === "STUDENT" && course.is_enrolled ? "btn btn-primary" : "btn btn-secondary"}
                     href={`/courses/${course.id}`}
                   >
-                    View course
+                    {user?.role === "STUDENT" && course.is_enrolled
+                      ? progress === 100 ? "Review course" : "Continue learning"
+                      : "View course"}
                   </Link>
 
                   {user?.role === "STUDENT" &&
@@ -886,7 +944,9 @@ function CoursesPageContent() {
                 </div>
               </div>
             </article>
-          ))}
+          )})}
+          </div>
+          )}
         </div>
       )}
 
