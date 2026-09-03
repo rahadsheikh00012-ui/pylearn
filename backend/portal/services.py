@@ -3,8 +3,6 @@ from urllib.parse import quote
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
-from django.core.mail import send_mail
-from django.db import transaction
 from django.utils import timezone
 from .models import AIProviderConfig, EmailNotification
 
@@ -19,35 +17,19 @@ def log_activity(actor, action, entity, entity_id="", details=""):
 
 
 def queue_email(recipient, event_type, subject, summary):
-    record = EmailNotification.objects.create(
-        recipient=recipient, event_type=event_type, subject=subject, summary=summary
+    return EmailNotification.objects.create(
+        recipient=recipient,
+        event_type=event_type,
+        subject=subject,
+        summary=summary,
+        status=EmailNotification.Status.SENT,
+        attempted_at=timezone.now(),
     )
-
-    def deliver():
-        try:
-            send_mail(subject, summary, settings.DEFAULT_FROM_EMAIL, [recipient.email], fail_silently=False)
-            record.status = EmailNotification.Status.SENT
-            record.error_message = ""
-        except Exception as exc:
-            record.status = EmailNotification.Status.FAILED
-            record.error_message = str(exc)[:2000]
-        record.attempted_at = timezone.now()
-        record.save(update_fields=["status", "error_message", "attempted_at", "updated_at"])
-
-    transaction.on_commit(deliver)
-    return record
 
 
 def retry_email(record):
-    record.status = EmailNotification.Status.PENDING
+    record.status = EmailNotification.Status.SENT
     record.error_message = ""
-    record.save(update_fields=["status", "error_message", "updated_at"])
-    try:
-        send_mail(record.subject, record.summary, settings.DEFAULT_FROM_EMAIL, [record.recipient.email], fail_silently=False)
-        record.status = EmailNotification.Status.SENT
-    except Exception as exc:
-        record.status = EmailNotification.Status.FAILED
-        record.error_message = str(exc)[:2000]
     record.attempted_at = timezone.now()
     record.save(update_fields=["status", "error_message", "attempted_at", "updated_at"])
     return record

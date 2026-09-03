@@ -749,9 +749,10 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             raise ValidationError("Only published courses are available.")
         if course.course_type == Course.CourseType.PAID:
             raise ValidationError("Submit payment and wait for admin approval to enroll in this paid course.")
+        if Enrollment.objects.filter(student=self.request.user, course=course).exists():
+            raise ValidationError("You are already enrolled in this course.")
         enrollment = serializer.save(student=self.request.user)
         log_activity(self.request.user, "ENROLL", "course", course.pk, course.title)
-        queue_email(self.request.user, "ENROLLMENT", "Course enrollment confirmed", f"You enrolled in {course.title}.")
 
 
 class QuizViewSet(viewsets.ModelViewSet):
