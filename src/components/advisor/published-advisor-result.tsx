@@ -68,15 +68,22 @@ export function PublishedAdvisorResult({ attempt }: { attempt: AdvisorAttempt })
         <div className="text-right"><div className="text-4xl font-bold text-[var(--primary)]">{attempt.percentage ?? "-"}%</div><div className="mt-1 font-semibold">{analysis.level ? analysis.level.toLowerCase().replace(/^./, value => value.toUpperCase()) : "Diagnostic result"}</div></div>
       </div>
       {!discovery && analysis.strongest_field_name && <p className="mt-5"><strong>Strongest field:</strong> {analysis.strongest_field_name}</p>}
-      {strongestSkills.length > 0 && <p className="mt-2"><strong>Strongest skills:</strong> {strongestSkills.join(", ")}</p>}
+      {strongestSkills.length > 0 && <p className="mt-3"><strong>{discovery ? "Strongest skill:" : "Strongest skills:"}</strong> {strongestSkills.join(", ")}</p>}
       <p className="muted mt-4 text-sm">Published {attempt.published_at ? new Date(attempt.published_at).toLocaleString() : "after administrator review"}</p>
     </section>
-    <section className="grid gap-4 md:grid-cols-2">
-      <div className="panel p-5"><h2 className="font-bold">Strengths</h2>{strengths.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{strengths.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">No specific strengths were listed.</p>}</div>
-      <div className="panel p-5"><h2 className="font-bold">Skill gaps</h2>{gaps.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{gaps.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">No priority gaps were identified.</p>}</div>
-    </section>
+    {discovery ? (
+      <section className="panel p-5">
+        <h2 className="font-bold">Strengths</h2>
+        {strengths.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{strengths.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">Demonstrated solid understanding across the assessment questions.</p>}
+      </section>
+    ) : (
+      <section className="grid gap-4 md:grid-cols-2">
+        <div className="panel p-5"><h2 className="font-bold">Strengths</h2>{strengths.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{strengths.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">No specific strengths were listed.</p>}</div>
+        <div className="panel p-5"><h2 className="font-bold">Skill gaps</h2>{gaps.length ? <ul className="mt-3 list-disc space-y-2 pl-5">{gaps.map(value => <li key={value}>{value}</li>)}</ul> : <p className="muted mt-3 text-sm">No priority gaps were identified.</p>}</div>
+      </section>
+    )}
     <section className="space-y-3"><h2 className="text-xl font-bold">Question breakdown</h2>{attempt.answers.map((answer, index) => ["MULTIPLE_CHOICE", "TRUE_FALSE"].includes(answer.question_type) ? <ObjectiveAnswerResult answer={answer} index={index} key={answer.question_id} /> : <WrittenAnswerResult answer={answer} index={index} key={answer.question_id} />)}</section>
-    <section className="panel p-5"><h2 className="mb-4 text-xl font-bold">Recommended courses</h2><AdvisorRecommendationCards recommendations={analysis.recommendations} /></section>
+    <section className="panel p-5"><h2 className="mb-4 text-xl font-bold">{discovery ? "Recommended Course" : "Recommended courses"}</h2><AdvisorRecommendationCards recommendations={analysis.recommendations} /></section>
     <Link className="btn btn-secondary" href="/learning-path">Back to AI Learning Path Advisor</Link>
   </div>;
 }

@@ -42,18 +42,58 @@ def _provider_json(prompt):
 
 def _payload(attempt):
     answers = list(attempt.answers.select_related("question", "question__learning_field", "question__advisor_skill"))
-    courses = Course.objects.filter(status=Course.Status.PUBLISHED).exclude(enrollments__student=attempt.student).prefetch_related("advisor_skill_mappings__skill")
+    courses = Course.objects.filter(status=Course.Status.PUBLISHED).exclude(enrollments__student=attempt.student).select_related("category").prefetch_related("advisor_skill_mappings__skill")
     fields = LearningField.objects.filter(is_active=True).prefetch_related("skills")
     return {
-        "quiz": {"id": attempt.quiz_id, "type": attempt.quiz.quiz_type, "target_field_id": attempt.quiz.target_field_id},
+        "quiz": {"id": attempt.quiz_id, "type": attempt.quiz.quiz_type, "is_initial_assessment": attempt.quiz.is_initial_assessment, "target_field_id": attempt.quiz.target_field_id},
         "learning_fields": [{"field_id": f.id, "name": f.name, "skills": [{"skill_id": s.id, "name": s.name} for s in f.skills.filter(is_active=True)]} for f in fields],
         "answers": [{"answer_id": a.id, "question": a.question.prompt, "type": a.question.question_type, "answer": a.answer, "correct_answer": a.question.correct_answer, "rubric": a.question.grading_rubric, "max_points": a.question.points, "objective_correct": a.is_correct, "field_id": a.question.learning_field_id, "skill_id": a.question.advisor_skill_id} for a in answers],
-        "courses": [{"course_id": c.id, "title": c.title, "level": c.level, "skills": [m.skill_id for m in c.advisor_skill_mappings.all()]} for c in courses],
+        "courses": [{"course_id": c.id, "title": c.title, "description": c.description, "category": c.category.name if c.category else "", "level": c.level, "skills": [m.skill.name for m in c.advisor_skill_mappings.all()]} for c in courses],
     }
 
 
 def _grading_prompt(attempt):
-    instructions = """Analyze and grade the complete Advisor attempt supplied below.
+    is_discovery = (
+        attempt.quiz.quiz_type == attempt.quiz.QuizType.SKILL_DISCOVERY
+        or attempt.quiz.is_initial_assessment
+    )
+
+    if is_discovery:
+        instructions = """Analyze and grade the complete Skill Discovery assessment attempt supplied below.
+
+Grading rules for every SHORT_ANSWER and LONG_ANSWER:
+- Grade semantic correctness: equivalent wording, capitalization, punctuation, grammar, word order, and extra correct explanation must not reduce the score.
+- In a reference answer, the pipe character | separates alternative accepted answers. It is never a literal response format. For example, "Continuous Integration|CI" means either phrase is accepted; "Continuous Integration (CI)" is fully correct.
+- Treat standard abbreviations and their expanded forms as equivalent when the context makes their meaning clear.
+- A response that contains all required concepts in the reference answer or rubric receives full points, even when it is more detailed than expected.
+- Give partial credit proportional to the correct required concepts demonstrated. Use zero only for blank, irrelevant, or substantively incorrect responses.
+- Feedback must explain missing or incorrect concepts. Never claim a format mismatch merely because the wording differs from the reference answer.
+- awarded_points must be a number from 0 through that answer's max_points.
+
+Skill Discovery Analysis rules:
+1. Questions in Skill Discovery do not have predefined skill tags. Analyze the questions, the student's answers, correctness, and demonstrated understanding across the assessment.
+2. Infer and determine the single most likely Strongest Skill of the student (e.g., "Problem Solving", "Communication", "Python Fundamentals", "System Design", "Algorithmic Thinking", etc.).
+3. Do NOT identify or return skill gaps. Skill Discovery does not use skill gaps; "gaps" must be an empty list [].
+4. Recommend exactly ONE best course: Based on the student's answers/results and the inferred strongest skill, evaluate the available courses and select the single most suitable course. Do not recommend multiple courses or a list.
+
+Return one JSON object with these keys:
+- answer_grades: one item for every SHORT_ANSWER and LONG_ANSWER, containing answer_id, awarded_points, and feedback
+- summary: a concise, strength-focused summary of the student's assessment performance
+- strongest_skill: the single inferred strongest skill name as a string (e.g. "Problem Solving" or "Communication")
+- strongest_skills: [strongest_skill] (array containing only the single strongest skill string)
+- strengths: list of 1-3 specific strengths demonstrated by the student
+- gaps: [] (must be an empty array)
+- recommendations: an array containing EXACTLY ONE object for the single best course:
+    - course_id: integer ID of the recommended course from the available courses list
+    - match_type: "EXACT_MATCH", "BEST_RELATED", or "ADVANCED"
+    - reason: a short, positive, strength-based explanation of why this course is the best recommendation
+
+Use only IDs supplied in the payload. Do not invent course IDs.
+
+ATTEMPT PAYLOAD:
+"""
+    else:
+        instructions = """Analyze and grade the complete Advisor attempt supplied below.
 
 Grading rules for every SHORT_ANSWER and LONG_ANSWER:
 - Grade semantic correctness: equivalent wording, capitalization, punctuation, grammar, word order, and extra correct explanation must not reduce the score.
@@ -104,27 +144,90 @@ def analyze_attempt(attempt_id, actor):
             score = sum((a.awarded_points for a in attempt.answers.all()), Decimal("0"))
             maximum = sum((Decimal(a.question.points) for a in attempt.answers.select_related("question")), Decimal("0"))
             percentage = (score / maximum * 100).quantize(Decimal("0.01")) if maximum else Decimal("0")
+            
+            is_discovery = (
+                attempt.quiz.quiz_type == attempt.quiz.QuizType.SKILL_DISCOVERY
+                or attempt.quiz.is_initial_assessment
+            )
+
             strongest_id = data.get("strongest_field_id")
-            strongest = LearningField.objects.filter(pk=strongest_id).first() if strongest_id else None
+            strongest = LearningField.objects.filter(pk=strongest_id).first() if (strongest_id and not is_discovery) else None
+
+            # Handle strongest skills (strings for discovery, IDs or strings for development)
+            strongest_skills_raw = data.get("strongest_skills")
+            if not strongest_skills_raw and data.get("strongest_skill"):
+                strongest_skills_raw = [data.get("strongest_skill")]
+            elif not strongest_skills_raw and data.get("strongest_skill_ids"):
+                strongest_skills_raw = data.get("strongest_skill_ids")
+            if isinstance(strongest_skills_raw, str):
+                strongest_skills_raw = [strongest_skills_raw]
+            if not isinstance(strongest_skills_raw, list):
+                strongest_skills_raw = []
+
+            gaps = [] if is_discovery else data.get("gaps", [])
+            field_scores = [] if is_discovery else data.get("field_scores", [])
+
             reviewer = actor if getattr(actor, "role", None) == "ADMIN" else None
-            analysis, _ = AdvisorAnalysis.objects.update_or_create(attempt=attempt, defaults={"summary": str(data.get("summary", "")), "strongest_field": strongest, "strongest_skills": data.get("strongest_skill_ids", []), "field_scores": data.get("field_scores", []), "strengths": data.get("strengths", []), "gaps": data.get("gaps", []), "level": level_for(percentage), "ai_payload": data, "reviewed_by": reviewer})
+            analysis, _ = AdvisorAnalysis.objects.update_or_create(
+                attempt=attempt,
+                defaults={
+                    "summary": str(data.get("summary", "")),
+                    "strongest_field": strongest,
+                    "strongest_skills": strongest_skills_raw,
+                    "field_scores": field_scores,
+                    "strengths": data.get("strengths", []),
+                    "gaps": gaps,
+                    "level": level_for(percentage),
+                    "ai_payload": data,
+                    "reviewed_by": reviewer,
+                }
+            )
             analysis.recommendations.all().delete()
             eligible = {c.id: c for c in Course.objects.filter(status=Course.Status.PUBLISHED).exclude(enrollments__student=attempt.student).prefetch_related("advisor_skill_mappings")}
             gap_skill_ids = {int(g["skill_id"]) for g in data.get("gaps", []) if isinstance(g, dict) and str(g.get("skill_id", "")).isdigit()}
             exact_available = any(gap_skill_ids.intersection({m.skill_id for m in c.advisor_skill_mappings.all()}) for c in eligible.values())
+            
+            recs_created = 0
             for rec in data.get("recommendations", []):
                 course = eligible.get(int(rec.get("course_id", 0)))
-                kind = rec.get("match_type")
-                covered = {m.skill_id for m in course.advisor_skill_mappings.all()} if course else set()
-                valid = bool(course and kind in AdvisorRecommendation.MatchType.values)
-                if kind == AdvisorRecommendation.MatchType.ADVANCED:
-                    valid = valid and course.level == Course.Level.ADVANCED
-                if attempt.quiz.quiz_type == attempt.quiz.QuizType.SKILL_DEVELOPMENT and kind == AdvisorRecommendation.MatchType.EXACT_MATCH:
-                    valid = valid and bool(gap_skill_ids.intersection(covered))
-                if attempt.quiz.quiz_type == attempt.quiz.QuizType.SKILL_DEVELOPMENT and kind == AdvisorRecommendation.MatchType.BEST_RELATED:
-                    valid = valid and not exact_available
+                if not course:
+                    continue
+                kind = rec.get("match_type") or AdvisorRecommendation.MatchType.EXACT_MATCH
+                if kind not in AdvisorRecommendation.MatchType.values:
+                    kind = AdvisorRecommendation.MatchType.EXACT_MATCH
+                
+                valid = True
+                if not is_discovery:
+                    covered = {m.skill_id for m in course.advisor_skill_mappings.all()}
+                    if kind == AdvisorRecommendation.MatchType.ADVANCED:
+                        valid = course.level == Course.Level.ADVANCED
+                    elif kind == AdvisorRecommendation.MatchType.EXACT_MATCH:
+                        valid = bool(gap_skill_ids.intersection(covered))
+                    elif kind == AdvisorRecommendation.MatchType.BEST_RELATED:
+                        valid = not exact_available
+
                 if valid:
-                    AdvisorRecommendation.objects.create(analysis=analysis, course=course, match_type=kind, reason=str(rec.get("reason", ""))[:2000])
+                    AdvisorRecommendation.objects.create(
+                        analysis=analysis,
+                        course=course,
+                        match_type=kind,
+                        reason=str(rec.get("reason", ""))[:2000]
+                    )
+                    recs_created += 1
+                    if is_discovery:
+                        # Exactly ONE recommendation for Discovery
+                        break
+
+            if is_discovery and recs_created == 0 and eligible:
+                fallback_course = next(iter(eligible.values()))
+                skill_name = strongest_skills_raw[0] if strongest_skills_raw else "your assessment"
+                AdvisorRecommendation.objects.create(
+                    analysis=analysis,
+                    course=fallback_course,
+                    match_type=AdvisorRecommendation.MatchType.BEST_RELATED,
+                    reason=f"Top recommended course based on your strongest skill in {skill_name}."
+                )
+
             attempt.score, attempt.max_score, attempt.percentage = score, maximum, percentage
             attempt.passed = percentage >= attempt.quiz.passing_score
             published_at = timezone.now()

@@ -75,7 +75,24 @@ class AnalysisSerializer(serializers.ModelSerializer):
 
     def get_strongest_skill_names(self, obj):
         if isinstance(obj.strongest_skills, list):
-            return list(AdvisorSkill.objects.filter(pk__in=[k for k in obj.strongest_skills if isinstance(k, int)]).values_list("name", flat=True))
+            names = []
+            id_list = [k for k in obj.strongest_skills if isinstance(k, int)]
+            if id_list:
+                id_map = dict(AdvisorSkill.objects.filter(pk__in=id_list).values_list("pk", "name"))
+            else:
+                id_map = {}
+            for item in obj.strongest_skills:
+                if isinstance(item, int) and item in id_map:
+                    names.append(id_map[item])
+                elif isinstance(item, str) and item.strip():
+                    names.append(item.strip())
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("skill") or str(item)
+                    if name:
+                        names.append(str(name).strip())
+            return names
+        if isinstance(obj.strongest_skills, str) and obj.strongest_skills.strip():
+            return [obj.strongest_skills.strip()]
         return []
 
     def get_strengths(self, obj):

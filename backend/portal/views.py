@@ -826,7 +826,7 @@ class QuizViewSet(viewsets.ModelViewSet):
         quiz = self.get_object()
         if request.user.role != User.Role.STUDENT:
             return Response({"detail": "Only Students submit quiz attempts."}, status=status.HTTP_403_FORBIDDEN)
-        is_advisor = quiz.is_initial_assessment or quiz.quiz_type == Quiz.QuizType.SKILL_DEVELOPMENT
+        is_advisor = quiz.is_initial_assessment or quiz.quiz_type in [Quiz.QuizType.SKILL_DISCOVERY, Quiz.QuizType.SKILL_DEVELOPMENT]
         if not is_advisor:
             get_object_or_404(Enrollment, student=request.user, course=quiz.course)
         if quiz.attempts.filter(student=request.user).exists():
