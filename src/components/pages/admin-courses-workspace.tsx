@@ -238,7 +238,7 @@ export function AdminCoursesWorkspace({ onBack }: { onBack?: () => void }) {
 
   async function handleRemoveCourse(id: number) {
     const isConfirmed = await confirmDialog(
-      "This will permanently delete the admin course and its learning materials.",
+      "This will permanently delete this admin course and its materials. If students have completed payments or earned certificates in this course, deletion will be protected to maintain academic records.",
       {
         title: "Delete admin course?",
         confirmLabel: "Delete course",

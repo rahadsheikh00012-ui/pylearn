@@ -157,6 +157,7 @@ X_FRAME_OPTIONS = "DENY"
 PASSWORD_RESET_TIMEOUT = int(os.getenv("PASSWORD_RESET_TIMEOUT", "900"))
 
 REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "portal.exceptions.custom_exception_handler",
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",

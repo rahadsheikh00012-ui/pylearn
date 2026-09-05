@@ -468,7 +468,7 @@ function CoursesPageContent() {
 
   async function handleRemoveCourse(id: number) {
     const isConfirmed = await confirmDialog(
-      "This will delete the course and its related content.",
+      "This will permanently delete this course and its materials. If students have completed payments or earned certificates in this course, deletion will be protected to maintain academic records.",
       {
         title: "Delete course?",
         confirmLabel: "Delete course",

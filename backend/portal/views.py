@@ -600,7 +600,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.pk == self.request.user.pk:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError("You cannot delete your own account.")
+            raise ValidationError({"detail": "You cannot delete your own administrator account. Another administrator must perform this action if necessary."})
         log_activity(self.request.user, "DELETE", "user", instance.pk, instance.email)
         instance.delete()
 
