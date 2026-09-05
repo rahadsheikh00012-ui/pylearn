@@ -178,6 +178,7 @@ REST_FRAMEWORK = {
 EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "PyLearn <noreply@pylearn.local>")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+CERTIFICATE_LOGO_FILENAME = os.getenv("NEXT_PUBLIC_LOGO_LIGHT", "dark.png").strip()
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
 AI_CONFIG_ENCRYPTION_KEY = os.getenv("AI_CONFIG_ENCRYPTION_KEY", "")

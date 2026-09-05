@@ -30,21 +30,24 @@ def _fit_text(text, font_name, max_size, min_size, max_width):
 
 
 def _draw_logo(pdf, x, y):
+    assets_dir = Path(settings.BASE_DIR).parent / "public" / "assets"
     candidates = (
-        Path(settings.BASE_DIR).parent / "public" / "assets" / "dark.png",
-        Path(settings.BASE_DIR).parent / "public" / "assets" / "pylearn-logo-light.png",
+        assets_dir / Path(settings.CERTIFICATE_LOGO_FILENAME).name,
+        assets_dir / "dark.png",
+        assets_dir / "pylearn-logo-light.png",
     )
-    for path in candidates:
-        if path.exists():
-            try:
-                image = ImageReader(str(path))
-                source_width, source_height = image.getSize()
-                height = 48
-                width = height * source_width / source_height
-                pdf.drawImage(image, x, y, width=width, height=height, mask="auto", preserveAspectRatio=True)
-                return width
-            except Exception:
-                continue
+    for source in candidates:
+        if not source.exists():
+            continue
+        try:
+            image = ImageReader(str(source))
+            source_width, source_height = image.getSize()
+            height = 48
+            width = height * source_width / source_height
+            pdf.drawImage(image, x, y, width=width, height=height, mask="auto", preserveAspectRatio=True)
+            return width
+        except Exception:
+            continue
     pdf.setFillColor(NAVY)
     pdf.setFont("Helvetica-Bold", 20)
     pdf.drawString(x, y + 9, "PyLearn")

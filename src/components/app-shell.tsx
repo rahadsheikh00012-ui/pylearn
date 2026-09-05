@@ -77,7 +77,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen lg:flex">
       {/* Sidebar Navigation */}
-      <aside className="app-sidebar p-4 lg:w-64 lg:min-h-screen">
+      <aside className="app-sidebar p-4 lg:w-64 lg:h-screen lg:sticky lg:top-0 lg:overflow-y-auto lg:shrink-0 lg:self-start">
         <Link
           href="/dashboard"
           className="flex items-center px-2 py-3"

@@ -5,11 +5,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
 import {
   ArrowRight,
+  Award,
   BookOpen,
   CheckCircle2,
+  CreditCard,
+  Eye,
   GraduationCap,
   Lock,
   Plus,
+  RotateCcw,
+  Search,
   Shield,
   TrendingUp,
   Users,
@@ -320,13 +325,64 @@ function CoursesPageContent() {
   const [busyMessage, setBusyMessage] = useState("");
   const [courseType, setCourseType] = useState<"FREE" | "PAID">("FREE");
   const [studentCourseTab, setStudentCourseTab] = useState<"all" | "my">("all");
+  const [enrolledFilter, setEnrolledFilter] = useState<"all" | "not-enrolled" | "enrolled">("all");
+  const [studentSearchQuery, setStudentSearchQuery] = useState("");
+  const [studentCategoryFilter, setStudentCategoryFilter] = useState("");
 
   const courses = data ? unwrap(data) : [];
   const enrollments = enrollmentResult.data ? unwrap(enrollmentResult.data) : [];
   const enrollmentByCourse = new Map(enrollments.map((item) => [item.course, item]));
-  const visibleCourses = user?.role === "STUDENT" && studentCourseTab === "my"
-    ? courses.filter((course) => course.is_enrolled)
+
+  const categoryList = categories.data ? unwrap(categories.data) : [];
+  const studentCategoryOptions = [
+    { value: "", label: "All categories" },
+    ...categoryList.map((cat) => ({ value: String(cat.id), label: cat.name })),
+  ];
+
+  const enrolledCount = enrollments.length;
+  const availableToEnrollCount = courses.filter((c) => !c.is_enrolled).length;
+
+  const visibleCourses = user?.role === "STUDENT"
+    ? courses.filter((course) => {
+        if (studentCourseTab === "my" && !course.is_enrolled) {
+          return false;
+        }
+        if (studentCourseTab === "all") {
+          if (enrolledFilter === "enrolled" && !course.is_enrolled) {
+            return false;
+          }
+          if (enrolledFilter === "not-enrolled" && course.is_enrolled) {
+            return false;
+          }
+        }
+        if (studentCategoryFilter && String(course.category) !== studentCategoryFilter) {
+          return false;
+        }
+        if (studentSearchQuery.trim()) {
+          const query = studentSearchQuery.toLowerCase().trim();
+          const matchTitle = course.title?.toLowerCase().includes(query);
+          const matchCode = course.course_code?.toLowerCase().includes(query);
+          const matchInstructor = course.instructor_name?.toLowerCase().includes(query);
+          const matchDesc = course.description?.toLowerCase().includes(query);
+          if (!matchTitle && !matchCode && !matchInstructor && !matchDesc) {
+            return false;
+          }
+        }
+        return true;
+      })
     : courses;
+
+  const hasActiveFilters = Boolean(
+    studentSearchQuery.trim() ||
+    studentCategoryFilter ||
+    (studentCourseTab === "all" && enrolledFilter !== "all")
+  );
+
+  function handleResetStudentFilters() {
+    setStudentSearchQuery("");
+    setStudentCategoryFilter("");
+    setEnrolledFilter("all");
+  }
 
   function openNewCourseModal() {
     setEditingCourse(null);
@@ -784,27 +840,98 @@ function CoursesPageContent() {
           </table>
         </div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-6">
           {user?.role === "STUDENT" && (
-            <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-3" role="tablist" aria-label="Course collection">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={studentCourseTab === "all"}
-                className={studentCourseTab === "all" ? "btn btn-primary" : "btn btn-secondary"}
-                onClick={() => setStudentCourseTab("all")}
-              >
-                All Courses
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={studentCourseTab === "my"}
-                className={studentCourseTab === "my" ? "btn btn-primary" : "btn btn-secondary"}
-                onClick={() => setStudentCourseTab("my")}
-              >
-                My Courses <span className="badge ml-1">{enrollments.length}</span>
-              </button>
+            <div className="space-y-4">
+              {/* Tab Navigation & Enrolled Quick Filters */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
+                <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Course collection">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={studentCourseTab === "all"}
+                    className={studentCourseTab === "all" ? "btn btn-primary" : "btn btn-secondary"}
+                    onClick={() => setStudentCourseTab("all")}
+                  >
+                    All Courses <span className="badge ml-1">{courses.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={studentCourseTab === "my"}
+                    className={studentCourseTab === "my" ? "btn btn-primary" : "btn btn-secondary"}
+                    onClick={() => setStudentCourseTab("my")}
+                  >
+                    My Courses <span className="badge ml-1">{enrolledCount}</span>
+                  </button>
+                </div>
+
+                {/* Quick filter chips when on "All Courses" tab */}
+                {studentCourseTab === "all" && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-[var(--muted)]">Status:</span>
+                    <button
+                      type="button"
+                      className={`btn text-xs py-1.5 px-3 ${enrolledFilter === "all" ? "btn-primary" : "btn-secondary"}`}
+                      onClick={() => setEnrolledFilter("all")}
+                    >
+                      All ({courses.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn text-xs py-1.5 px-3 ${enrolledFilter === "not-enrolled" ? "btn-primary" : "btn-secondary"}`}
+                      onClick={() => setEnrolledFilter("not-enrolled")}
+                    >
+                      Available ({availableToEnrollCount})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn text-xs py-1.5 px-3 ${enrolledFilter === "enrolled" ? "btn-primary" : "btn-secondary"}`}
+                      onClick={() => setEnrolledFilter("enrolled")}
+                    >
+                      <CheckCircle2 size={13} />
+                      Enrolled ({enrolledCount})
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Search & Category Filter Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="relative min-w-[260px] flex-1 max-w-md">
+                  <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-[var(--muted)]">
+                    <Search size={16} />
+                  </span>
+                  <input
+                    type="text"
+                    className="field !pl-12 text-sm"
+                    placeholder="Search courses by title, code, or instructor..."
+                    value={studentSearchQuery}
+                    onChange={(e) => setStudentSearchQuery(e.target.value)}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <ModernSelect
+                    className="field min-w-[200px]"
+                    aria-label="Filter by category"
+                    value={studentCategoryFilter}
+                    onValueChange={(val) => setStudentCategoryFilter(val)}
+                    options={studentCategoryOptions}
+                  />
+
+                  {hasActiveFilters && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary text-xs"
+                      onClick={handleResetStudentFilters}
+                    >
+                      <RotateCcw size={13} />
+                      Reset filters
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -813,17 +940,60 @@ function CoursesPageContent() {
           ) : user?.role === "STUDENT" && studentCourseTab === "my" && enrollmentResult.loading ? (
             <Loading variant="list" />
           ) : visibleCourses.length === 0 ? (
-            <Empty message="You have not enrolled in any courses yet. Browse All Courses to get started." />
+            hasActiveFilters ? (
+              <div className="panel flex flex-col items-center justify-center p-8 text-center">
+                <BookOpen size={36} className="text-[var(--muted)] mb-2" />
+                <h3 className="text-base font-bold text-[var(--foreground)]">No matching courses found</h3>
+                <p className="muted mt-1 max-w-md text-sm">
+                  No courses matched your current filter criteria. Try clearing the search query or adjusting your filters.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary mt-4 text-xs"
+                  onClick={handleResetStudentFilters}
+                >
+                  <RotateCcw size={13} />
+                  Reset all filters
+                </button>
+              </div>
+            ) : (
+              <Empty message={studentCourseTab === "my" ? "You have not enrolled in any courses yet. Browse All Courses to get started." : "No courses are currently available in the catalog."} />
+            )
           ) : (
           <div className="grid-cards">
           {visibleCourses.map((course) => {
             const enrollment = enrollmentByCourse.get(course.id);
             const progress = enrollment?.progress ?? 0;
+            const isCompleted = progress === 100;
+            const isStudent = user?.role === "STUDENT";
+            const isEnrolled = isStudent && course.is_enrolled;
+
             return (
             <article
               key={course.id}
-              className="panel flex flex-col overflow-hidden"
+              className={`panel relative flex flex-col overflow-hidden transition-all hover:shadow-lg ${
+                isEnrolled
+                  ? "border-[color-mix(in_srgb,var(--primary)_45%,var(--border))]"
+                  : ""
+              }`}
             >
+              {/* Top Floating Enrolled Badge on thumbnail for Enrolled Course */}
+              {isEnrolled && (
+                <div className="absolute top-3 right-3 z-10 inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--primary)_30%,transparent)] bg-[color-mix(in_srgb,var(--background)_85%,transparent)] px-2.5 py-1 text-xs font-bold text-[var(--primary)] backdrop-blur-md shadow-sm">
+                  {isCompleted ? (
+                    <>
+                      <Award size={13} />
+                      <span>Completed</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={13} />
+                      <span>Enrolled</span>
+                    </>
+                  )}
+                </div>
+              )}
+
               {course.thumbnail ? (
                 <img
                   src={course.thumbnail}
@@ -874,12 +1044,12 @@ function CoursesPageContent() {
                   <span>{course.enrollment_count} enrolled</span>
                 </div>
 
-                {user?.role === "STUDENT" && course.is_enrolled && (
-                  <div className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
+                {isEnrolled && (
+                  <div className="mt-5 rounded-xl border border-[color-mix(in_srgb,var(--primary)_25%,var(--border))] bg-[color-mix(in_srgb,var(--primary)_5%,var(--background))] p-3">
                     <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-                      <span className="font-semibold">Course progress</span>
-                      <strong className={progress === 100 ? "text-[var(--success)]" : "text-[var(--primary)]"}>
-                        {Math.round(progress)}%
+                      <span className="font-semibold text-xs">Course progress</span>
+                      <strong className={isCompleted ? "text-[var(--success)] text-xs" : "text-[var(--primary)] text-xs"}>
+                        {Math.round(progress)}% {isCompleted ? "(Completed)" : ""}
                       </strong>
                     </div>
                     <progress className="h-2 w-full accent-[var(--primary)]" value={progress} max={100} aria-label={`${course.title} progress`} />
@@ -887,24 +1057,35 @@ function CoursesPageContent() {
                 )}
 
                 <div className="mt-5 flex flex-wrap items-center gap-2">
-                  <Link
-                    className={user?.role === "STUDENT" && course.is_enrolled ? "btn btn-primary" : "btn btn-secondary"}
-                    href={`/courses/${course.id}`}
-                  >
-                    {user?.role === "STUDENT" && course.is_enrolled
-                      ? progress === 100 ? "Review course" : "Continue learning"
-                      : "View course"}
-                  </Link>
-
-                  {user?.role === "STUDENT" &&
-                    (course.is_enrolled ? (
-                      <span
-                        className="badge self-center"
-                        aria-label="Enrollment status"
+                  {isEnrolled ? (
+                    <>
+                      <Link
+                        className="btn btn-primary"
+                        href={`/courses/${course.id}`}
                       >
-                        Enrolled
-                      </span>
-                    ) : (
+                        {isCompleted ? (
+                          <>
+                            <RotateCcw size={15} />
+                            <span>Review course</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowRight size={15} />
+                            <span>Continue learning</span>
+                          </>
+                        )}
+                      </Link>
+                      <Link
+                        className="btn btn-secondary text-xs"
+                        href={`/courses/${course.id}`}
+                        title="View details"
+                      >
+                        <Eye size={14} />
+                        <span>Details</span>
+                      </Link>
+                    </>
+                  ) : isStudent ? (
+                    <>
                       <button
                         type="button"
                         className="btn btn-primary"
@@ -915,16 +1096,36 @@ function CoursesPageContent() {
                             : void handleEnroll(course.id)
                         }
                       >
-                        {enrollingCourseId === course.id
-                          ? "Enrolling…"
-                          : course.course_type === "PAID"
-                            ? "Submit payment"
-                            : "Enroll"}
+                        {enrollingCourseId === course.id ? (
+                          <span>Enrolling...</span>
+                        ) : course.course_type === "PAID" ? (
+                          <>
+                            <CreditCard size={15} />
+                            <span>Submit payment</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowRight size={15} />
+                            <span>Enroll</span>
+                          </>
+                        )}
                       </button>
-                    ))}
-
-                  {user?.role !== "STUDENT" && (
+                      <Link
+                        className="btn btn-secondary"
+                        href={`/courses/${course.id}`}
+                      >
+                        <Eye size={15} />
+                        <span>View course</span>
+                      </Link>
+                    </>
+                  ) : (
                     <>
+                      <Link
+                        className="btn btn-secondary"
+                        href={`/courses/${course.id}`}
+                      >
+                        View course
+                      </Link>
                       <button
                         type="button"
                         className="btn btn-secondary"

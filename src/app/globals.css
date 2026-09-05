@@ -204,7 +204,23 @@ th { color: var(--muted); font-size: .75rem; font-weight: 600; text-transform: u
 .app-header { background: var(--panel); border-bottom: 1px solid var(--border); }
 
 /* Sidebar Layout (Updated to match mockups) */
-.app-sidebar { background: var(--sidebar-bg); color: var(--sidebar-fg); border-right: 1px solid var(--sidebar-border); }
+.app-sidebar {
+  background: var(--sidebar-bg);
+  color: var(--sidebar-fg);
+  border-right: 1px solid var(--sidebar-border);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--sidebar-fg) 22%, transparent) transparent;
+}
+.app-sidebar::-webkit-scrollbar {
+  width: 5px;
+}
+.app-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.app-sidebar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--sidebar-fg) 22%, transparent);
+  border-radius: 999px;
+}
 .nav-link-active { background: var(--primary); color: white; font-weight: 600; border-radius: 8px; }
 .nav-link-inactive { color: color-mix(in srgb, var(--sidebar-fg) 70%, transparent); }
 .nav-link-inactive:hover { background: color-mix(in srgb, var(--sidebar-fg) 10%, transparent); color: var(--sidebar-fg); border-radius: 8px; }
