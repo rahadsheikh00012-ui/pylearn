@@ -25,7 +25,8 @@ class VercelBlobStorage(Storage):
         if self.access not in {"public", "private"}:
             raise ImproperlyConfigured("MEDIA_STORAGE_ACCESS must be 'public' or 'private'.")
         self.token = token or os.getenv("BLOB_READ_WRITE_TOKEN")
-        self.store_id = store_id or os.getenv("BLOB_STORE_ID")
+        # Dashboard IDs include store_; Blob hostnames use the bare identifier.
+        self.store_id = (store_id or os.getenv("BLOB_STORE_ID") or "").strip().removeprefix("store_").lower()
         self.public_url_base = (
             public_url_base
             or os.getenv("MEDIA_STORAGE_PUBLIC_URL_BASE")
@@ -83,7 +84,7 @@ class VercelBlobStorage(Storage):
             raise ImproperlyConfigured(f"Vercel Blob upload failed: {exc}") from exc
         saved_name = str(result.get("pathname") or name).replace("\\", "/").lstrip("/")
         if result.get("url"):
-            self._url_cache[saved_name] = result["url"]
+            self._url_cache[quote(saved_name, safe="/")] = result["url"]
         return saved_name
 
     def delete(self, name):

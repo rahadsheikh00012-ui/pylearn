@@ -3,6 +3,7 @@ import sys
 
 import django
 from django.core.management import call_command
+from django.db import connections
 
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "pylearn.settings")
@@ -10,6 +11,7 @@ django.setup()
 
 call_command("collectstatic", interactive=False, verbosity=1)
 call_command("migrate", interactive=False, verbosity=1)
+connections.close_all()
 
 port = os.getenv("PORT", "8000")
 if os.getenv("DJANGO_DEBUG", "false").lower() in ("true", "1", "yes"):

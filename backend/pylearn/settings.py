@@ -80,7 +80,8 @@ else:
         "PASSWORD": parsed.password or "",
         "HOST": parsed.hostname or "localhost",
         "PORT": parsed.port or 5432,
-        "CONN_MAX_AGE": 60,
+        # Development server threads must release scarce pooler sessions after each request.
+        "CONN_MAX_AGE": 0 if DEBUG else 60,
         "OPTIONS": {"sslmode": sslmode},
     }}
 
@@ -178,7 +179,7 @@ REST_FRAMEWORK = {
 EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "PyLearn <noreply@pylearn.local>")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-CERTIFICATE_LOGO_FILENAME = os.getenv("NEXT_PUBLIC_LOGO_LIGHT", "dark.png").strip()
+CERTIFICATE_LOGO_FILENAME = os.getenv("NEXT_PUBLIC_LOGO_LIGHT", "").strip()
 FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
 AI_CONFIG_ENCRYPTION_KEY = os.getenv("AI_CONFIG_ENCRYPTION_KEY", "")

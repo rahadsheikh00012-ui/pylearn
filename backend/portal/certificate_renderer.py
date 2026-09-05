@@ -8,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.utils import ImageReader
@@ -31,27 +32,19 @@ def _fit_text(text, font_name, max_size, min_size, max_width):
 
 def _draw_logo(pdf, x, y):
     assets_dir = Path(settings.BASE_DIR).parent / "public" / "assets"
-    candidates = (
-        assets_dir / Path(settings.CERTIFICATE_LOGO_FILENAME).name,
-        assets_dir / "dark.png",
-        assets_dir / "pylearn-logo-light.png",
-    )
-    for source in candidates:
-        if not source.exists():
-            continue
-        try:
-            image = ImageReader(str(source))
-            source_width, source_height = image.getSize()
-            height = 48
-            width = height * source_width / source_height
-            pdf.drawImage(image, x, y, width=width, height=height, mask="auto", preserveAspectRatio=True)
-            return width
-        except Exception:
-            continue
-    pdf.setFillColor(NAVY)
-    pdf.setFont("Helvetica-Bold", 20)
-    pdf.drawString(x, y + 9, "PyLearn")
-    return 78
+    filename = settings.CERTIFICATE_LOGO_FILENAME
+    if not filename:
+        raise ImproperlyConfigured("Set NEXT_PUBLIC_LOGO_LIGHT in backend/.env to the certificate logo filename.")
+    source = assets_dir / Path(filename).name
+    try:
+        image = ImageReader(str(source))
+        source_width, source_height = image.getSize()
+    except Exception as exc:
+        raise ImproperlyConfigured("The certificate logo configured by NEXT_PUBLIC_LOGO_LIGHT could not be loaded.") from exc
+    height = 48
+    width = height * source_width / source_height
+    pdf.drawImage(image, x, y, width=width, height=height, mask="auto", preserveAspectRatio=True)
+    return width
 
 
 def render_certificate_pdf(certificate):
@@ -61,7 +54,7 @@ def render_certificate_pdf(certificate):
     width, height = page
     pdf = canvas.Canvas(output, pagesize=page, pageCompression=1)
     pdf.setTitle(f"PyLearn Certificate - {certificate.verification_number}")
-    pdf.setAuthor("PyLearn Learning Systems")
+    pdf.setAuthor("PyLearn Portal")
 
     # Layered border and corner accents.
     pdf.setStrokeColor(NAVY)
@@ -78,11 +71,14 @@ def render_certificate_pdf(certificate):
     # Header branding.
     logo_width = _draw_logo(pdf, 58, height - 82)
     pdf.setFillColor(INK)
-    pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawString(66 + logo_width, height - 58, "PYLEARN LEARNING SYSTEMS")
-    pdf.setFillColor(MUTED)
-    pdf.setFont("Helvetica", 8)
-    pdf.drawString(66 + logo_width, height - 72, "PROFESSIONAL LEARNING & CERTIFICATION")
+    pdf.setFont("Helvetica-Bold", 22)
+    pdf.drawString(66 + logo_width, height - 58, "PyLearn")
+    pdf.setFillColor(GOLD)
+    pdf.setFont("Helvetica", 22)
+    pdf.drawString(66 + logo_width + stringWidth("PyLearn ", "Helvetica-Bold", 22), height - 58, "Portal")
+    pdf.setFillColor(INK)
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(66 + logo_width, height - 74, "Learning Management System")
     pdf.setStrokeColor(HexColor("#E6D3A7"))
     pdf.line(58, height - 95, width - 58, height - 95)
 
