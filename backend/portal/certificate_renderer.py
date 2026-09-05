@@ -31,7 +31,7 @@ def _fit_text(text, font_name, max_size, min_size, max_width):
 
 
 def _draw_logo(pdf, x, y):
-    assets_dir = Path(settings.BASE_DIR).parent / "public" / "assets"
+    assets_dir = Path(settings.BASE_DIR) / "assets"
     filename = settings.CERTIFICATE_LOGO_FILENAME
     if not filename:
         raise ImproperlyConfigured("Set NEXT_PUBLIC_LOGO_LIGHT in backend/.env to the certificate logo filename.")
