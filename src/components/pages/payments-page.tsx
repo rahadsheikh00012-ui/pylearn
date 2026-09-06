@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Search, X } from "lucide-react";
 import { api, jsonBody, unwrap } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
 import { useAuth } from "@/components/auth-provider";
@@ -24,8 +25,19 @@ const money = (value:string|number) => new Intl.NumberFormat("en-BD", { style:"c
 
 export function PaymentsPage() {
   const { user, loading:authLoading } = useAuth();
+  const [searchQuery,setSearchQuery] = useState("");
   const [statusFilter,setStatusFilter] = useState<"ALL"|PaymentStatus>("ALL");
-  const paymentPath = !user ? null : user.role === "ADMIN" && statusFilter !== "ALL" ? `/payments/?status=${statusFilter}` : "/payments/";
+  const [methodFilter,setMethodFilter] = useState<"ALL"|MethodCode>("ALL");
+  const paymentPath = useMemo(()=>{
+    if(!user)return null;
+    if(user.role!=="ADMIN")return "/payments/";
+    const params=new URLSearchParams();
+    if(searchQuery.trim())params.set("q",searchQuery.trim());
+    if(statusFilter!=="ALL")params.set("status",statusFilter);
+    if(methodFilter!=="ALL")params.set("method",methodFilter);
+    const query=params.toString();
+    return `/payments/${query?`?${query}`:""}`;
+  },[methodFilter,searchQuery,statusFilter,user]);
   const list = useApiData<Payment[]|{results:Payment[]}>(paymentPath);
   const methods = useApiData<Method[]|{results:Method[]}>(user && user.role !== "INSTRUCTOR" ? "/payment-methods/" : null);
   const courses = useApiData<Course[]|{results:Course[]}>(user?.role === "STUDENT" ? "/courses/" : null);
@@ -119,7 +131,13 @@ export function PaymentsPage() {
     </>}
 
     <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">Payment records</h2>{user?.role==="ADMIN"&&<ModernSelect className="field max-w-xs" aria-label="Payment status" value={statusFilter} onValueChange={value=>setStatusFilter(value as "ALL"|PaymentStatus)} options={[{value:"ALL",label:"All statuses"},{value:"PENDING",label:"Pending"},{value:"APPROVED",label:"Approved"},{value:"REJECTED",label:"Rejected"}]}/>}</div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold">Payment records</h2></div>
+      {user?.role==="ADMIN"&&<div className="panel grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_220px_220px_auto]">
+        <div className="relative"><Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[var(--muted)]" size={18} aria-hidden="true"/><input className="field !pl-11" value={searchQuery} onChange={event=>setSearchQuery(event.target.value)} placeholder="Search student, transaction, course, sender, amount…" aria-label="Search payments"/></div>
+        <ModernSelect className="field" aria-label="Payment status" value={statusFilter} onValueChange={value=>setStatusFilter(value as "ALL"|PaymentStatus)} options={[{value:"ALL",label:"All statuses"},{value:"PENDING",label:"Pending"},{value:"APPROVED",label:"Approved"},{value:"REJECTED",label:"Rejected"}]}/>
+        <ModernSelect className="field" aria-label="Payment method filter" value={methodFilter} onValueChange={value=>setMethodFilter(value as "ALL"|MethodCode)} options={[{value:"ALL",label:"All methods"},{value:"BKASH",label:"bKash"},{value:"NAGAD",label:"Nagad"},{value:"BANK_PAY",label:"Bank Pay"}]}/>
+        <button className="btn btn-secondary" type="button" disabled={!searchQuery&&statusFilter==="ALL"&&methodFilter==="ALL"} onClick={()=>{setSearchQuery("");setStatusFilter("ALL");setMethodFilter("ALL")}}><X size={16} aria-hidden="true"/>Clear</button>
+      </div>}
       {!payments.length?<Empty message="No payment records."/>:payments.map(p=><article className="panel space-y-3 p-4" key={p.id}>
         <div className="flex flex-wrap items-start justify-between gap-3"><div><strong>{p.course_title}</strong><p className="muted text-sm">{p.student_name} · {p.method_display_name} · {p.transaction_id}</p></div><span className="badge">{p.status}</span></div>
         <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><span className="muted block text-xs">Amount paid</span>{money(p.amount)}</div><div><span className="muted block text-xs">Captured course price</span>{money(p.course_price_snapshot)}</div><div><span className="muted block text-xs">Payment date</span>{new Date(`${p.payment_date}T00:00:00`).toLocaleDateString()}</div><div><span className="muted block text-xs">Submitted</span>{new Date(p.created_at).toLocaleString()}</div></div>

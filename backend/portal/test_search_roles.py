@@ -1,6 +1,8 @@
+from datetime import date
+
 from rest_framework.test import APITestCase
 
-from .models import Course, CourseCategory, Enrollment, LearningMaterial, Quiz, User
+from .models import Course, CourseCategory, Enrollment, LearningMaterial, Payment, PaymentMethodConfig, Quiz, User
 
 
 class RoleAwareSearchTests(APITestCase):
@@ -19,6 +21,27 @@ class RoleAwareSearchTests(APITestCase):
         Enrollment.objects.create(student=self.student, course=self.public)
         Enrollment.objects.create(student=self.other_student, course=self.owned)
         Quiz.objects.create(course=self.public, title="Public Search Quiz", description="Enrolled quiz", is_published=True)
+        self.payment_method = PaymentMethodConfig.objects.create(
+            method=PaymentMethodConfig.Method.BKASH,
+            display_name="Operations bKash",
+            account_details="01700000000",
+            account_holder="PyLearn Accounts",
+        )
+        self.payment = Payment.objects.create(
+            student=self.other_student,
+            course=self.public,
+            payment_method=self.payment_method,
+            method=PaymentMethodConfig.Method.BKASH,
+            method_display_name=self.payment_method.display_name,
+            account_details_snapshot=self.payment_method.account_details,
+            account_holder_snapshot=self.payment_method.account_holder,
+            sender_details="01911112222",
+            transaction_id="PAY-SEARCH-001",
+            course_price_snapshot="500.00",
+            amount="500.00",
+            payment_date=date(2026, 9, 1),
+            proof="payment-proofs/test.png",
+        )
 
     def search(self, user, **params):
         self.client.force_authenticate(user)
@@ -66,3 +89,30 @@ class RoleAwareSearchTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["groups"]["courses"]["page_size"], 20)
         self.assertEqual(response.data["groups"]["courses"]["count"], 3)
+
+    def test_admin_payment_search_matches_visible_fields_and_status(self):
+        for query in ["private-student", "STU-PRIVATE", "0191111", "Operations bKash", "PyLearn Accounts", "500.00", "2026-09-01"]:
+            response = self.search(self.admin, q=query, tab="payments", payment_status="PENDING")
+            self.assertEqual(response.status_code, 200, query)
+            self.assertEqual([row["id"] for row in response.data["groups"]["payments"]["results"]], [self.payment.pk], query)
+
+    def test_admin_payment_endpoint_combines_search_status_and_method_filters(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.get("/api/v1/payments/", {"q": "private-student", "status": "PENDING", "method": "BKASH"})
+        self.assertEqual(response.status_code, 200)
+        rows = response.data.get("results", response.data)
+        self.assertEqual([row["id"] for row in rows], [self.payment.pk])
+
+        self.assertEqual(self.client.get("/api/v1/payments/", {"method": "CASH"}).status_code, 400)
+
+    def test_payment_amount_search_is_independent_of_decimal_storage_format(self):
+        self.client.force_authenticate(self.admin)
+        for query in ["500", "500.00", "0500.00"]:
+            with self.subTest(query=query):
+                response = self.client.get("/api/v1/payments/", {"q": query})
+                self.assertEqual(response.status_code, 200)
+                rows = response.data.get("results", response.data)
+                self.assertEqual([row["id"] for row in rows], [self.payment.pk])
+        for query in ["NaN", "Infinity", "1e999", "not-an-amount"]:
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get("/api/v1/payments/", {"q": query}).status_code, 200)

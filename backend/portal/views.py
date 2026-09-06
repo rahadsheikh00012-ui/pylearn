@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import base64
 import json
 import mimetypes
@@ -456,6 +456,18 @@ class PaymentMethodConfigViewSet(viewsets.ModelViewSet):
         return [IsAuthenticated()] if self.action in ["list", "retrieve"] else [IsAdminRole()]
 
 
+def payment_amount_query(query):
+    """Match decimal amounts independently of database text formatting."""
+    condition = Q(amount__icontains=query)
+    try:
+        amount = Decimal(query)
+        if amount.is_finite() and abs(amount) < Decimal("10000000000"):
+            condition |= Q(amount=amount)
+    except InvalidOperation:
+        pass
+    return condition
+
+
 class PaymentViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -464,12 +476,35 @@ class PaymentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Payment.objects.select_related("student", "course", "payment_method", "reviewed_by")
         if is_admin(self.request.user):
+            query = str(self.request.query_params.get("q", "")).strip()
             requested_status = str(self.request.query_params.get("status", "")).upper()
+            requested_method = str(self.request.query_params.get("method", "")).upper()
             if requested_status and requested_status not in Payment.Status.values:
                 raise ValidationError("Status must be PENDING, APPROVED, or REJECTED.")
+            if requested_method and requested_method not in PaymentMethodConfig.Method.values:
+                raise ValidationError("Method must be BKASH, NAGAD, or BANK_PAY.")
             if requested_status in Payment.Status.values:
                 qs = qs.filter(status=requested_status)
-            return qs
+            if requested_method in PaymentMethodConfig.Method.values:
+                qs = qs.filter(method=requested_method)
+            if query:
+                qs = qs.filter(
+                    Q(transaction_id__icontains=query)
+                    | Q(student__email__icontains=query)
+                    | Q(student__first_name__icontains=query)
+                    | Q(student__last_name__icontains=query)
+                    | Q(student__student_id__icontains=query)
+                    | Q(course__title__icontains=query)
+                    | Q(course__course_code__icontains=query)
+                    | Q(sender_details__icontains=query)
+                    | Q(method_display_name__icontains=query)
+                    | Q(account_details_snapshot__icontains=query)
+                    | Q(account_holder_snapshot__icontains=query)
+                    | payment_amount_query(query)
+                    | Q(payment_date__icontains=query)
+                    | Q(admin_note__icontains=query)
+                )
+            return qs.distinct()
         if self.request.user.role == User.Role.STUDENT:
             return qs.filter(student=self.request.user)
         return qs.none()
@@ -511,7 +546,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
             return Response({"detail": "A rejection reason is required."}, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
             payment = get_object_or_404(
-                Payment.objects.select_for_update().select_related("student", "course", "reviewed_by"),
+                Payment.objects.select_for_update(of=("self",)).select_related("student", "course"),
                 pk=pk,
             )
             if payment.status != Payment.Status.PENDING:
@@ -1071,7 +1106,21 @@ class SearchView(APIView):
             if query:
                 users = users.filter(Q(email__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(student_id__icontains=query))
                 enrollments = enrollments.filter(Q(student__email__icontains=query) | Q(course__title__icontains=query) | Q(course__course_code__icontains=query))
-                payments = payments.filter(Q(transaction_id__icontains=query) | Q(student__email__icontains=query) | Q(course__title__icontains=query))
+                payments = payments.filter(
+                    Q(transaction_id__icontains=query)
+                    | Q(student__email__icontains=query)
+                    | Q(student__first_name__icontains=query)
+                    | Q(student__last_name__icontains=query)
+                    | Q(student__student_id__icontains=query)
+                    | Q(course__title__icontains=query)
+                    | Q(course__course_code__icontains=query)
+                    | Q(sender_details__icontains=query)
+                    | Q(method_display_name__icontains=query)
+                    | Q(account_holder_snapshot__icontains=query)
+                    | payment_amount_query(query)
+                    | Q(payment_date__icontains=query)
+                    | Q(admin_note__icontains=query)
+                )
                 certificates = certificates.filter(Q(verification_number__icontains=query) | Q(student_name__icontains=query) | Q(course_title__icontains=query))
                 applications = applications.filter(Q(reference__icontains=query) | Q(full_name__icontains=query) | Q(email__icontains=query))
             groups.update({

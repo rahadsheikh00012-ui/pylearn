@@ -91,3 +91,8 @@ output/pdf/pylearn-certificate-updated-header.pdf
 output/pdf/certificate-preview.png
 output/pdf/certificate-updated-header-preview.png
 output/pdf/pylearn-PYL-36E9486B80DD41B6-light.pdf
+backend/local_qa_seed.py
+backend/local_qa_settings.py
+backend/portal/test_search_roles.py
+backend/portal/test_ui_contracts.py
+backend/portal/test_AdvisorAdmin.py
